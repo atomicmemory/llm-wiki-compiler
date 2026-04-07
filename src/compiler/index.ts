@@ -39,6 +39,7 @@ import {
 import { markOrphaned, orphanUnownedFrozenPages } from "./orphan.js";
 import { resolveLinks } from "./resolver.js";
 import { generateIndex } from "./indexgen.js";
+import { addObsidianMeta, generateMOC } from "./obsidian.js";
 import * as output from "../utils/output.js";
 import {
   COMPILE_CONCURRENCY,
@@ -164,6 +165,7 @@ async function runCompilePipeline(root: string): Promise<void> {
   }
 
   await generateIndex(root);
+  await generateMOC(root);
 
   output.header("Compilation complete");
   output.status("✓", output.success(
@@ -289,13 +291,15 @@ async function generateMergedPage(
   const createdAt = (existing?.meta.createdAt && typeof existing.meta.createdAt === "string")
     ? existing.meta.createdAt
     : now;
-  const frontmatter = buildFrontmatter({
+  const frontmatterFields: Record<string, unknown> = {
     title: entry.concept.concept,
     summary: entry.concept.summary,
     sources: entry.sourceFiles,
     createdAt,
     updatedAt: now,
-  });
+  };
+  addObsidianMeta(frontmatterFields, entry.concept.concept, entry.concept.tags ?? []);
+  const frontmatter = buildFrontmatter(frontmatterFields);
   const fullPage = `${frontmatter}\n\n${pageBody}\n`;
   await writePageIfValid(pagePath, fullPage, entry.concept.concept);
 }

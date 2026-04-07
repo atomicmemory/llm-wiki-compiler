@@ -8,6 +8,7 @@ export interface ExtractedConcept {
   concept: string;
   summary: string;
   is_new: boolean;
+  tags?: string[];
 }
 
 /** Per-source entry in .llmwiki/state.json. */
@@ -38,6 +39,8 @@ interface WikiFrontmatter {
   sources: string[];
   summary: string;
   orphaned?: boolean;
+  tags?: string[];
+  aliases?: string[];
   createdAt: string;
   updatedAt: string;
 }

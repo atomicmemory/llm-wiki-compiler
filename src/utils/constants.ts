@@ -31,3 +31,4 @@ export const LLMWIKI_DIR = ".llmwiki";
 export const STATE_FILE = ".llmwiki/state.json";
 export const LOCK_FILE = ".llmwiki/lock";
 export const INDEX_FILE = "wiki/index.md";
+export const MOC_FILE = "wiki/MOC.md";

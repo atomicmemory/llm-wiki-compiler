@@ -34,6 +34,12 @@ export const CONCEPT_EXTRACTION_TOOL = {
               type: "boolean",
               description: "True if this is a new concept not in existing wiki",
             },
+            tags: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "2-4 categorical tags for organizing this concept (e.g., 'machine-learning', 'optimization')",
+            },
           },
           required: ["concept", "summary", "is_new"],
         },
@@ -121,12 +127,20 @@ export function parseConcepts(toolOutput: string): ExtractedConcept[] {
   try {
     const parsed = JSON.parse(toolOutput);
     const concepts: ExtractedConcept[] = parsed.concepts ?? [];
-    return concepts.filter(
-      (c) =>
-        typeof c.concept === "string" &&
-        typeof c.summary === "string" &&
-        typeof c.is_new === "boolean",
-    );
+    return concepts
+      .filter(
+        (c) =>
+          typeof c.concept === "string" &&
+          typeof c.summary === "string" &&
+          typeof c.is_new === "boolean" &&
+          (c.tags === undefined || Array.isArray(c.tags)),
+      )
+      .map((c) => ({
+        concept: c.concept,
+        summary: c.summary,
+        is_new: c.is_new,
+        tags: Array.isArray(c.tags) ? c.tags : undefined,
+      }));
   } catch {
     return [];
   }

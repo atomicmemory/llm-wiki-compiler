@@ -1,17 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdir, writeFile, readFile, rm } from "fs/promises";
+import { writeFile, readFile } from "fs/promises";
 import path from "path";
-import os from "os";
 import { generateIndex } from "../src/compiler/indexgen.js";
 import { buildFrontmatter } from "../src/utils/markdown.js";
-
-/** Create a temp directory simulating an llmwiki project root. */
-async function makeTempRoot(): Promise<string> {
-  const root = path.join(os.tmpdir(), `llmwiki-idx-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  await mkdir(path.join(root, "wiki/concepts"), { recursive: true });
-  await mkdir(path.join(root, "wiki/queries"), { recursive: true });
-  return root;
-}
+import { makeTempRoot } from "./fixtures/temp-root.js";
 
 /** Write a minimal wiki page with frontmatter into a directory. */
 async function writePage(dir: string, slug: string, title: string, summary: string): Promise<void> {
@@ -23,7 +15,7 @@ describe("generateIndex", () => {
   let root: string;
 
   beforeEach(async () => {
-    root = await makeTempRoot();
+    root = await makeTempRoot("idx");
   });
 
   it("includes concept pages in the index", async () => {
