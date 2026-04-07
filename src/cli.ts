@@ -13,6 +13,7 @@ import ingestCommand from "./commands/ingest.js";
 import compileCommand from "./commands/compile.js";
 import queryCommand from "./commands/query.js";
 import watchCommand from "./commands/watch.js";
+import lintCommand from "./commands/lint.js";
 
 const require = createRequire(import.meta.url);
 const { version } = require("../package.json") as { version: string };
@@ -70,6 +71,18 @@ program
     requireApiKey();
     try {
       await watchCommand();
+    } catch (err) {
+      console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command("lint")
+  .description("Run rule-based quality checks against the wiki")
+  .action(async () => {
+    try {
+      await lintCommand();
     } catch (err) {
       console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
       process.exit(1);
