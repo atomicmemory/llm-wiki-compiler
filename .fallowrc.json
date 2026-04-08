@@ -1,0 +1,11 @@
+{
+  "$schema": "https://fallow.tools/schema.json",
+  "overrides": [
+    {
+      "files": ["src/providers/*.ts"],
+      "rules": {
+        "unused-class-members": "off"
+      }
+    }
+  ]
+}

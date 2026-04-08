@@ -20,8 +20,18 @@ export const RETRY_COUNT = 3;
 export const RETRY_BASE_MS = 1000;
 export const RETRY_MULTIPLIER = 4;
 
-/** Claude model to use for all LLM calls. */
-export const MODEL = "claude-sonnet-4-20250514";
+/** Default provider when LLMWIKI_PROVIDER is not set. */
+export const DEFAULT_PROVIDER = "anthropic";
+
+/** Default model per provider. */
+export const PROVIDER_MODELS: Record<string, string> = {
+  anthropic: "claude-sonnet-4-20250514",
+  openai: "gpt-4o",
+  ollama: "llama3.1",
+};
+
+/** Default Ollama API base URL. */
+export const OLLAMA_DEFAULT_HOST = "http://localhost:11434/v1";
 
 /** Directory names relative to the project root. */
 export const SOURCES_DIR = "sources";

@@ -13,8 +13,8 @@
 
 import { existsSync } from "fs";
 import path from "path";
-import Anthropic from "@anthropic-ai/sdk";
 import { callClaude } from "../utils/llm.js";
+import type { LLMTool } from "../utils/provider.js";
 import { atomicWrite, safeReadFile, slugify, buildFrontmatter, parseFrontmatter } from "../utils/markdown.js";
 import { generateIndex } from "../compiler/indexgen.js";
 import * as output from "../utils/output.js";
@@ -23,8 +23,8 @@ import { QUERY_PAGE_LIMIT, INDEX_FILE, CONCEPTS_DIR, QUERIES_DIR } from "../util
 /** Directories to search when loading selected pages, in priority order. */
 const PAGE_DIRS = [CONCEPTS_DIR, QUERIES_DIR];
 
-/** Anthropic tool schema for page selection. */
-const PAGE_SELECTION_TOOL: Anthropic.Tool = {
+/** Tool schema for page selection (provider-agnostic). */
+const PAGE_SELECTION_TOOL: LLMTool = {
   name: "select_pages",
   description: "Select the most relevant wiki pages to answer a question",
   input_schema: {

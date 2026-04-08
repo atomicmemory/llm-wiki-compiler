@@ -1,8 +1,8 @@
 /**
  * CLI entry point for llmwiki — the knowledge compiler.
  *
- * Registers all commands (ingest, compile, query, watch) via Commander.
- * Validates ANTHROPIC_API_KEY for commands that need LLM access.
+ * Registers all commands (ingest, compile, query, watch, lint) via Commander.
+ * Validates the correct API key for the selected LLM provider.
  * Designed for `npx llmwiki` or global install via `npm install -g llm-wiki-compiler`.
  */
 
@@ -14,6 +14,7 @@ import compileCommand from "./commands/compile.js";
 import queryCommand from "./commands/query.js";
 import watchCommand from "./commands/watch.js";
 import lintCommand from "./commands/lint.js";
+import { DEFAULT_PROVIDER } from "./utils/constants.js";
 
 const require = createRequire(import.meta.url);
 const { version } = require("../package.json") as { version: string };
@@ -41,7 +42,7 @@ program
   .command("compile")
   .description("Compile sources/ into an interlinked wiki")
   .action(async () => {
-    requireApiKey();
+    requireProvider();
     try {
       await compileCommand();
     } catch (err) {
@@ -55,7 +56,7 @@ program
   .description("Ask a question against the wiki")
   .option("--save", "Save the answer as a wiki page")
   .action(async (question: string, options: { save?: boolean }) => {
-    requireApiKey();
+    requireProvider();
     try {
       await queryCommand(process.cwd(), question, options);
     } catch (err) {
@@ -68,7 +69,7 @@ program
   .command("watch")
   .description("Watch sources/ and auto-recompile on changes")
   .action(async () => {
-    requireApiKey();
+    requireProvider();
     try {
       await watchCommand();
     } catch (err) {
@@ -89,16 +90,33 @@ program
     }
   });
 
-program.parse();
+/** API key env var required per provider. Null means no key needed. */
+const PROVIDER_KEY_VARS: Record<string, string | null> = {
+  anthropic: "ANTHROPIC_API_KEY",
+  openai: "OPENAI_API_KEY",
+  ollama: null,
+};
 
-/** Exit with a helpful message if ANTHROPIC_API_KEY is missing. */
-function requireApiKey(): void {
-  if (!process.env.ANTHROPIC_API_KEY) {
+/** Exit with a helpful message if the selected provider's API key is missing. */
+function requireProvider(): void {
+  const provider = process.env.LLMWIKI_PROVIDER ?? DEFAULT_PROVIDER;
+  const keyVar = PROVIDER_KEY_VARS[provider];
+
+  if (keyVar === undefined) {
     console.error(
-      "\x1b[31mError:\x1b[0m ANTHROPIC_API_KEY environment variable is required.\n" +
-        "  Set it with: export ANTHROPIC_API_KEY=sk-ant-...\n" +
-        "  Get a key at: https://console.anthropic.com/settings/keys",
+      `\x1b[31mError:\x1b[0m Unknown provider "${provider}".\n` +
+        `  Supported: ${Object.keys(PROVIDER_KEY_VARS).join(", ")}`,
+    );
+    process.exit(1);
+  }
+
+  if (keyVar && !process.env[keyVar]) {
+    console.error(
+      `\x1b[31mError:\x1b[0m ${keyVar} environment variable is required for the "${provider}" provider.\n` +
+        `  Set it with: export ${keyVar}=<your-key>`,
     );
     process.exit(1);
   }
 }
+
+program.parse();
