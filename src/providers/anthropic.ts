@@ -5,17 +5,59 @@
  * Handles complete, streaming, and tool-use calls against Claude models.
  */
 
-import Anthropic from "@anthropic-ai/sdk";
+import Anthropic, { type ClientOptions } from "@anthropic-ai/sdk";
 import type { LLMProvider, LLMMessage, LLMTool } from "../utils/provider.js";
+
+/**
+ * Builds the client options for the Anthropic SDK.
+ *
+ * Handles optional baseURL and filters out empty values so the SDK
+ * can fall back to its internal defaults when not specified.
+ */
+interface AnthropicProviderOptions {
+  apiKey?: string;
+  authToken?: string;
+  baseURL?: string;
+}
+
+export function buildAnthropicClientOptions(
+  options: AnthropicProviderOptions = {},
+): ClientOptions {
+  const trimmedBaseURL = options.baseURL?.trim();
+  const trimmedApiKey = options.apiKey?.trim();
+  const trimmedAuthToken = options.authToken?.trim();
+
+  const result: ClientOptions = {};
+
+  if (trimmedApiKey) {
+    result.apiKey = trimmedApiKey;
+  }
+  if (trimmedAuthToken) {
+    result.authToken = trimmedAuthToken;
+  }
+
+  if (!trimmedBaseURL) {
+    return result;
+  }
+
+  const normalizedBaseURL =
+    trimmedBaseURL.endsWith("/") && trimmedBaseURL.length > 1
+      ? trimmedBaseURL.slice(0, -1)
+      : trimmedBaseURL;
+
+  result.baseURL = normalizedBaseURL;
+  return result;
+}
+
 
 /** Anthropic-backed LLM provider using the official SDK. */
 export class AnthropicProvider implements LLMProvider {
   private readonly client: Anthropic;
   private readonly model: string;
 
-  constructor(model: string) {
+  constructor(model: string, options: AnthropicProviderOptions = {}) {
     this.model = model;
-    this.client = new Anthropic();
+    this.client = new Anthropic(buildAnthropicClientOptions(options));
   }
 
   /** Send a single non-streaming completion request. */
