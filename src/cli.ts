@@ -15,6 +15,7 @@ import queryCommand from "./commands/query.js";
 import watchCommand from "./commands/watch.js";
 import lintCommand from "./commands/lint.js";
 import { DEFAULT_PROVIDER } from "./utils/constants.js";
+import { resolveAnthropicAuthFromEnv } from "./utils/claude-settings.js";
 
 const require = createRequire(import.meta.url);
 const { version } = require("../package.json") as { version: string };
@@ -42,8 +43,8 @@ program
   .command("compile")
   .description("Compile sources/ into an interlinked wiki")
   .action(async () => {
-    requireProvider();
     try {
+      requireProvider();
       await compileCommand();
     } catch (err) {
       console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
@@ -56,8 +57,8 @@ program
   .description("Ask a question against the wiki")
   .option("--save", "Save the answer as a wiki page")
   .action(async (question: string, options: { save?: boolean }) => {
-    requireProvider();
     try {
+      requireProvider();
       await queryCommand(process.cwd(), question, options);
     } catch (err) {
       console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
@@ -69,8 +70,8 @@ program
   .command("watch")
   .description("Watch sources/ and auto-recompile on changes")
   .action(async () => {
-    requireProvider();
     try {
+      requireProvider();
       await watchCommand();
     } catch (err) {
       console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
@@ -100,6 +101,19 @@ const PROVIDER_KEY_VARS: Record<string, string | null> = {
 /** Exit with a helpful message if the selected provider's API key is missing. */
 function requireProvider(): void {
   const provider = process.env.LLMWIKI_PROVIDER ?? DEFAULT_PROVIDER;
+
+  if (provider === "anthropic") {
+    const auth = resolveAnthropicAuthFromEnv();
+    if (!auth.apiKey && !auth.authToken) {
+      console.error(
+        `\x1b[31mError:\x1b[0m Anthropic credentials are required for the "anthropic" provider.\n` +
+          `  Set one of: export ANTHROPIC_API_KEY=<your-key> OR export ANTHROPIC_AUTH_TOKEN=<your-token>`,
+      );
+      process.exit(1);
+    }
+    return;
+  }
+
   const keyVar = PROVIDER_KEY_VARS[provider];
 
   if (keyVar === undefined) {

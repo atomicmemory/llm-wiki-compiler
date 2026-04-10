@@ -17,10 +17,53 @@ Inspired by Karpathy's [LLM Wiki](https://gist.github.com/karpathy/442a6bf555914
 ```bash
 npm install -g llm-wiki-compiler
 export ANTHROPIC_API_KEY=sk-...
+# Or use ANTHROPIC_AUTH_TOKEN if your Anthropic-compatible gateway expects it.
+# Or use a different provider:
+# export LLMWIKI_PROVIDER=openai
+# export OPENAI_API_KEY=sk-...
 
 llmwiki ingest https://some-article.com
 llmwiki compile
 llmwiki query "what is X?"
+```
+
+## Configuration
+
+llmwiki configures providers via environment variables. The default provider is Anthropic.
+
+Configuration precedence for Anthropic values:
+
+1. Shell env / local `.env`
+2. Claude Code settings fallback (`~/.claude/settings.json` → `env` block)
+3. Built-in provider defaults (where applicable)
+
+- `LLMWIKI_PROVIDER`: The provider to use (e.g., anthropic, openai).
+- `LLMWIKI_MODEL`: The model name to override the provider default.
+
+### Anthropic (Default)
+
+- `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`: Required. Either one can satisfy Anthropic authentication.
+- `ANTHROPIC_BASE_URL`: Optional. Custom endpoint for proxies. Valid HTTP(S) URLs are accepted, including Claude-style path endpoints such as `https://api.kimi.com/coding/`.
+
+Example using an Anthropic or cc-switch custom proxy:
+
+```bash
+export LLMWIKI_PROVIDER=anthropic
+export ANTHROPIC_API_KEY=sk-...
+export ANTHROPIC_BASE_URL=https://proxy.example.com
+```
+
+If those values are not set in shell env or `.env`, llmwiki will try Anthropic-compatible values from `~/.claude/settings.json` (`env` block) for:
+
+- `ANTHROPIC_API_KEY`
+- `ANTHROPIC_AUTH_TOKEN`
+- `ANTHROPIC_BASE_URL`
+- `ANTHROPIC_MODEL`
+
+Example with zero exports (Claude Code already configured):
+
+```bash
+llmwiki compile
 ```
 
 ## Why not just RAG?
@@ -109,7 +152,7 @@ See `examples/basic/` in the repo for pre-generated output you can browse withou
 
 ## Limitations
 
-Early software. Best for small, high-signal corpora (a few dozen sources). Query routing is index-based. Anthropic-only for now.
+Early software. Best for small, high-signal corpora (a few dozen sources). Query routing is index-based.
 
 **Honest about truncation.** Sources that exceed the character limit are truncated on ingest with `truncated: true` and the original character count recorded in frontmatter, so downstream consumers know they're working with partial content.
 
@@ -142,7 +185,7 @@ If you want to contribute, these are the highest-leverage areas right now. Issue
 
 ## Requirements
 
-Node.js >= 18, an Anthropic API key.
+Node.js >= 18, plus provider credentials (for Anthropic: `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`).
 
 ## License
 

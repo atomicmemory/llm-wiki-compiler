@@ -10,6 +10,11 @@ import { DEFAULT_PROVIDER, PROVIDER_MODELS, OLLAMA_DEFAULT_HOST } from "./consta
 import { AnthropicProvider } from "../providers/anthropic.js";
 import { OpenAIProvider } from "../providers/openai.js";
 import { OllamaProvider } from "../providers/ollama.js";
+import {
+  resolveAnthropicAuthFromEnv,
+  resolveAnthropicBaseURLFromEnv,
+  resolveAnthropicModelFromEnv,
+} from "./claude-settings.js";
 
 /** A single message in an LLM conversation. */
 export interface LLMMessage {
@@ -51,27 +56,44 @@ const SUPPORTED_PROVIDERS: ReadonlySet<string> = new Set(["anthropic", "openai",
  * Direct process.env access is acceptable here as this is a system boundary.
  */
 export function getProvider(): LLMProvider {
-  const providerName = process.env.LLMWIKI_PROVIDER ?? DEFAULT_PROVIDER;
-
-  if (!SUPPORTED_PROVIDERS.has(providerName)) {
-    throw new Error(
-      `Unknown provider "${providerName}". Supported: ${[...SUPPORTED_PROVIDERS].join(", ")}`,
-    );
-  }
-
-  const model = process.env.LLMWIKI_MODEL ?? PROVIDER_MODELS[providerName];
+  const providerName = getProviderName();
 
   switch (providerName) {
     case "anthropic":
-      return new AnthropicProvider(model);
+      return getAnthropicProvider();
     case "openai":
-      return new OpenAIProvider(model);
+      return new OpenAIProvider(getModelForProvider("openai"));
     case "ollama":
       return new OllamaProvider(
-        model,
+        getModelForProvider("ollama"),
         process.env.OLLAMA_HOST ?? OLLAMA_DEFAULT_HOST,
       );
     default:
       throw new Error(`Unhandled provider: ${providerName}`);
   }
+}
+
+function getModelForProvider(providerName: "openai" | "ollama"): string {
+  return process.env.LLMWIKI_MODEL ?? PROVIDER_MODELS[providerName];
+}
+
+function getAnthropicProvider(): AnthropicProvider {
+  const model = resolveAnthropicModelFromEnv() ?? PROVIDER_MODELS.anthropic;
+  const baseURL = resolveAnthropicBaseURLFromEnv();
+  const auth = resolveAnthropicAuthFromEnv();
+
+  return new AnthropicProvider(model, {
+    baseURL,
+    ...auth,
+  });
+}
+
+function getProviderName(): string {
+  const providerName = process.env.LLMWIKI_PROVIDER ?? DEFAULT_PROVIDER;
+  if (!SUPPORTED_PROVIDERS.has(providerName)) {
+    throw new Error(
+      `Unknown provider "${providerName}". Supported: ${[...SUPPORTED_PROVIDERS].join(", ")}`,
+    );
+  }
+  return providerName;
 }
