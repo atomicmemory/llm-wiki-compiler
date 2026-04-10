@@ -10,3 +10,4 @@ dist/
 localdocs/
 .fallow/
 .worktrees/
+.sisyphus/
