@@ -12,6 +12,7 @@ import { MAX_SOURCE_CHARS, MIN_SOURCE_CHARS, SOURCES_DIR } from "../utils/consta
 import * as output from "../utils/output.js";
 import ingestWeb from "../ingest/web.js";
 import ingestFile from "../ingest/file.js";
+import type { IngestResult } from "../utils/types.js";
 
 /** Check whether a source string looks like a URL. */
 function isUrl(source: string): boolean {
@@ -96,10 +97,14 @@ async function saveSource(title: string, document: string): Promise<string> {
 }
 
 /**
- * Ingest a source (URL or local file) and save it to the sources/ directory.
+ * Programmatic ingest entry point. Identical fetch + write logic to the CLI
+ * command but returns a structured IngestResult instead of writing to stdout.
+ * Used by the MCP server's ingest_source tool.
+ *
  * @param source - A URL (http/https) or a local file path (.md or .txt).
+ * @returns Saved filename, character count, truncation flag, and source URI.
  */
-export default async function ingest(source: string): Promise<void> {
+export async function ingestSource(source: string): Promise<IngestResult> {
   output.status("*", output.info(`Ingesting: ${source}`));
 
   const { title, content } = isUrl(source)
@@ -111,9 +116,25 @@ export default async function ingest(source: string): Promise<void> {
   const document = buildDocument(title, source, result);
   const savedPath = await saveSource(title, document);
 
+  return {
+    filename: path.basename(savedPath),
+    charCount: result.content.length,
+    truncated: result.truncated,
+    source,
+  };
+}
+
+/**
+ * Ingest a source (URL or local file) and save it to the sources/ directory.
+ * @param source - A URL (http/https) or a local file path (.md or .txt).
+ */
+export default async function ingest(source: string): Promise<void> {
+  const result = await ingestSource(source);
+  const savedPath = path.join(SOURCES_DIR, result.filename);
+
   output.status(
     "+",
-    output.success(`Saved ${output.bold(title)} → ${output.source(savedPath)}`)
+    output.success(`Saved ${output.bold(result.filename)} → ${output.source(savedPath)}`)
   );
   output.status("→", output.dim("Next: llmwiki compile"));
 }

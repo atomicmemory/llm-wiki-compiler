@@ -20,6 +20,7 @@ import { generateIndex } from "../compiler/indexgen.js";
 import * as output from "../utils/output.js";
 import { QUERY_PAGE_LIMIT, INDEX_FILE, CONCEPTS_DIR, QUERIES_DIR } from "../utils/constants.js";
 import { findRelevantPages, updateEmbeddings } from "../utils/embeddings.js";
+import type { QueryResult } from "../utils/types.js";
 
 /** Directories to search when loading selected pages, in priority order. */
 const PAGE_DIRS = [CONCEPTS_DIR, QUERIES_DIR];
@@ -59,7 +60,7 @@ interface PageSelectionResult {
  * @param indexContent - The full text of wiki/index.md.
  * @returns Parsed page slugs and reasoning from Claude.
  */
-async function selectPages(
+export async function selectPages(
   question: string,
   indexContent: string,
 ): Promise<PageSelectionResult> {
@@ -166,30 +167,29 @@ export async function loadSelectedPages(root: string, slugs: string[]): Promise<
   return sections.join("\n\n");
 }
 
+/** Shared system prompt for the answer-generation step. */
+const ANSWER_SYSTEM_PROMPT =
+  "You are a knowledge assistant. Answer the question using ONLY the wiki content provided. " +
+  "Cite specific pages using [[Page Title]] wikilinks. " +
+  "If the wiki doesn't contain enough information, say so.";
+
 /**
- * Stream an answer from Claude using the loaded wiki pages as context.
- * @param question - The user's natural language question.
- * @param pagesContent - Combined content of the selected wiki pages.
- * @returns The full answer text after streaming completes.
+ * Call the LLM with the loaded wiki pages as grounding context.
+ * Streams to the provided onToken callback when one is supplied,
+ * otherwise returns the full answer without streaming.
  */
-async function streamAnswer(question: string, pagesContent: string): Promise<string> {
-  const systemPrompt =
-    "You are a knowledge assistant. Answer the question using ONLY the wiki content provided. " +
-    "Cite specific pages using [[Page Title]] wikilinks. " +
-    "If the wiki doesn't contain enough information, say so.";
-
+async function callAnswerLLM(
+  question: string,
+  pagesContent: string,
+  onToken?: (text: string) => void,
+): Promise<string> {
   const userMessage = `Question: ${question}\n\nRelevant wiki pages:\n${pagesContent}`;
-
-  const answer = await callClaude({
-    system: systemPrompt,
+  return callClaude({
+    system: ANSWER_SYSTEM_PROMPT,
     messages: [{ role: "user", content: userMessage }],
-    stream: true,
-    onToken: (text: string) => process.stdout.write(text),
+    stream: Boolean(onToken),
+    onToken,
   });
-
-  // Ensure terminal output ends on a new line after streaming
-  process.stdout.write("\n");
-  return answer;
 }
 
 /**
@@ -212,7 +212,7 @@ export function summarizeAnswer(answer: string): string {
  * @param question - The original question used as the page title.
  * @param answer - The generated answer body.
  */
-async function saveQueryPage(root: string, question: string, answer: string): Promise<void> {
+async function saveQueryPage(root: string, question: string, answer: string): Promise<string> {
   const slug = slugify(question);
   const filePath = path.join(root, QUERIES_DIR, `${slug}.md`);
 
@@ -243,6 +243,56 @@ async function saveQueryPage(root: string, question: string, answer: string): Pr
     const message = err instanceof Error ? err.message : String(err);
     output.status("!", output.warn(`Skipped embeddings update: ${message}`));
   }
+
+  return slug;
+}
+
+/** Options for generateAnswer — programmatic-friendly. */
+interface GenerateAnswerOptions {
+  /** Persist the answer as a wiki query page when set. */
+  save?: boolean;
+  /** Per-token callback for streaming. Omit for non-streaming usage. */
+  onToken?: (text: string) => void;
+  /** Callback fired once page selection completes — lets CLIs print reasoning before streaming. */
+  onPageSelection?: (pages: string[], reasoning: string) => void;
+}
+
+/**
+ * Run the two-step page-selection + answer-generation pipeline and return
+ * a structured QueryResult. This is the programmatic entry point used by
+ * the MCP server and any non-CLI consumer.
+ *
+ * @param root - Absolute path to the project root directory.
+ * @param question - The natural language question to answer.
+ * @param options - Streaming + save behaviour controls.
+ * @returns Answer text, selected slugs, reasoning, and saved slug if applicable.
+ */
+export async function generateAnswer(
+  root: string,
+  question: string,
+  options: GenerateAnswerOptions = {},
+): Promise<QueryResult> {
+  if (!existsSync(path.join(root, INDEX_FILE))) {
+    throw new Error("Wiki index not found. Run `llmwiki compile` first.");
+  }
+
+  const { pages, reasoning } = await selectRelevantPages(root, question);
+  options.onPageSelection?.(pages, reasoning);
+
+  const pagesContent = await loadSelectedPages(root, pages);
+
+  if (!pagesContent) {
+    return { answer: "", selectedPages: pages, reasoning };
+  }
+
+  const answer = await callAnswerLLM(question, pagesContent, options.onToken);
+
+  let saved: string | undefined;
+  if (options.save) {
+    saved = await saveQueryPage(root, question, answer);
+  }
+
+  return { answer, selectedPages: pages, reasoning, saved };
 }
 
 /**
@@ -261,29 +311,27 @@ export default async function queryCommand(
     return;
   }
 
-  // Step 1: Select relevant pages
   output.header("Selecting relevant pages");
 
-  const { pages, rawPages, reasoning } = await selectRelevantPages(root, question);
+  const result = await generateAnswer(root, question, {
+    save: options.save,
+    onToken: (text) => process.stdout.write(text),
+    onPageSelection: (pages, reasoning) => {
+      output.status("i", output.dim(`Reasoning: ${reasoning}`));
+      output.status("*", output.info(`Selected ${pages.length} page(s): ${pages.join(", ")}`));
+      output.header("Generating answer");
+    },
+  });
 
-  output.status("i", output.dim(`Reasoning: ${reasoning}`));
-  output.status("*", output.info(`Selected ${pages.length} page(s): ${rawPages.join(", ")}`));
+  // Newline after streamed answer so subsequent terminal output formats cleanly.
+  process.stdout.write("\n");
 
-  // Step 2: Load pages and stream the answer
-  output.header("Generating answer");
-
-  const pagesContent = await loadSelectedPages(root, pages);
-
-  if (!pagesContent) {
+  if (!result.answer) {
     output.status("!", output.error("No matching pages found. Try refining your question."));
     return;
   }
 
-  const answer = await streamAnswer(question, pagesContent);
-
-  // Optional: save the answer as a query page
-  if (options.save) {
-    await saveQueryPage(root, question, answer);
+  if (result.saved) {
     output.status("→", output.dim("Saved. Future queries will use this answer as context."));
   } else {
     output.status("→", output.dim("Tip: use --save to add this answer to your wiki"));

@@ -51,3 +51,29 @@ export interface PageSummary {
   slug: string;
   summary: string;
 }
+
+/** Structured result returned by the compile pipeline. */
+export interface CompileResult {
+  compiled: number;
+  skipped: number;
+  deleted: number;
+  concepts: string[];
+  pages: string[];
+  errors: string[];
+}
+
+/** Structured result returned by the query pipeline. */
+export interface QueryResult {
+  answer: string;
+  selectedPages: string[];
+  reasoning: string;
+  saved?: string;
+}
+
+/** Structured result returned by the ingest pipeline. */
+export interface IngestResult {
+  filename: string;
+  charCount: number;
+  truncated: boolean;
+  source: string;
+}

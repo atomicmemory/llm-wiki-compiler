@@ -36,37 +36,54 @@ export async function generateIndex(root: string): Promise<void> {
   output.status("+", output.success(`Index updated with ${total} pages.`));
 }
 
-/**
- * Scan the concepts directory and extract page summaries from frontmatter.
- * @param conceptsPath - Absolute path to wiki/concepts/.
- * @returns Array of page summary objects.
- */
-async function collectPageSummaries(
-  conceptsPath: string,
-): Promise<PageSummary[]> {
-  let files: string[];
+/** A scanned page paired with its parsed frontmatter. */
+interface ScannedPage {
+  slug: string;
+  meta: Record<string, unknown>;
+}
 
+/**
+ * Scan a wiki directory and return every .md page paired with its parsed
+ * frontmatter. Read-only utility shared by index generation and the MCP
+ * server's status tool.
+ * @param dirPath - Absolute path to a wiki page directory.
+ * @returns Array of {slug, meta} entries — empty when the directory is missing.
+ */
+export async function scanWikiPages(dirPath: string): Promise<ScannedPage[]> {
+  let files: string[];
   try {
-    files = await readdir(conceptsPath);
+    files = await readdir(dirPath);
   } catch {
     return [];
   }
 
-  const pages: PageSummary[] = [];
-
+  const scanned: ScannedPage[] = [];
   for (const file of files.filter((f) => f.endsWith(".md"))) {
-    const content = await safeReadFile(path.join(conceptsPath, file));
+    const content = await safeReadFile(path.join(dirPath, file));
     const { meta } = parseFrontmatter(content);
-    if (meta.title && typeof meta.title === "string" && !meta.orphaned) {
-      pages.push({
-        title: meta.title,
-        slug: file.replace(/\.md$/, ""),
-        summary: typeof meta.summary === "string" ? meta.summary : "",
-      });
-    }
+    scanned.push({ slug: file.replace(/\.md$/, ""), meta });
   }
+  return scanned;
+}
 
-  return pages;
+/**
+ * Project a wiki directory into PageSummary entries (excludes orphaned and
+ * untitled pages). Built on top of scanWikiPages so the MCP server can share
+ * the underlying scan logic without re-reading the directory.
+ * @param conceptsPath - Absolute path to wiki/concepts/.
+ * @returns Array of page summary objects.
+ */
+export async function collectPageSummaries(
+  conceptsPath: string,
+): Promise<PageSummary[]> {
+  const scanned = await scanWikiPages(conceptsPath);
+  return scanned
+    .filter(({ meta }) => meta.title && typeof meta.title === "string" && !meta.orphaned)
+    .map(({ slug, meta }) => ({
+      title: meta.title as string,
+      slug,
+      summary: typeof meta.summary === "string" ? meta.summary : "",
+    }));
 }
 
 /** Strip [[wikilink]] brackets from text, leaving the inner text intact. */

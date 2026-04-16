@@ -49,7 +49,18 @@ import {
   SOURCES_DIR,
 } from "../utils/constants.js";
 import pLimit from "p-limit";
-import type { ExtractedConcept, SourceState, SourceChange } from "../utils/types.js";
+import type {
+  CompileResult,
+  ExtractedConcept,
+  SourceChange,
+  SourceState,
+  WikiState,
+} from "../utils/types.js";
+
+/** Empty CompileResult used when no pipeline work runs (e.g. lock contention). */
+function emptyCompileResult(): CompileResult {
+  return { compiled: 0, skipped: 0, deleted: 0, concepts: [], pages: [], errors: [] };
+}
 
 /**
  * Run the full compilation pipeline with lock protection.
@@ -58,108 +69,207 @@ import type { ExtractedConcept, SourceState, SourceChange } from "../utils/types
  * @param root - Project root directory.
  */
 export async function compile(root: string): Promise<void> {
+  await compileAndReport(root);
+}
+
+/**
+ * Run the full compilation pipeline and return a structured result.
+ * Same behaviour as compile() but exposes counts, slugs, and errors so
+ * non-CLI consumers (the MCP server, programmatic callers) can report
+ * meaningful data without scraping terminal output.
+ * @param root - Project root directory.
+ * @returns Structured result describing what was compiled.
+ */
+export async function compileAndReport(root: string): Promise<CompileResult> {
   output.header("llmwiki compile");
 
   const locked = await acquireLock(root);
   if (!locked) {
     output.status("!", output.error("Could not acquire lock. Try again later."));
-    return;
+    return {
+      ...emptyCompileResult(),
+      errors: ["Could not acquire .llmwiki/lock — another compile is in progress."],
+    };
   }
 
   try {
-    await runCompilePipeline(root);
+    return await runCompilePipeline(root);
   } finally {
     await releaseLock(root);
   }
 }
 
-/** Inner pipeline, runs under lock protection. */
-async function runCompilePipeline(root: string): Promise<void> {
-  const state = await readState(root);
-  const changes = await detectChanges(root, state);
+/** Buckets of source changes used by the compile pipeline. */
+interface ChangeBuckets {
+  toCompile: SourceChange[];
+  deleted: SourceChange[];
+  unchanged: SourceChange[];
+}
 
-  // Semantic dependency tracking: find unchanged sources that share concepts
-  // with changed sources and need recompilation to preserve cross-source content
-  const affectedFiles = findAffectedSources(state, changes);
-  for (const file of affectedFiles) {
-    output.status("~", output.info(`${file} [affected by shared concept]`));
-    changes.push({ file, status: "changed" });
+/** Sort source changes into the buckets the pipeline acts on. */
+function bucketChanges(changes: SourceChange[]): ChangeBuckets {
+  return {
+    toCompile: changes.filter((c) => c.status === "new" || c.status === "changed"),
+    deleted: changes.filter((c) => c.status === "deleted"),
+    unchanged: changes.filter((c) => c.status === "unchanged"),
+  };
+}
+
+/** Result of phase 2: page writes plus any errors collected along the way. */
+interface PageGenerationResult {
+  pages: MergedConcept[];
+  errors: string[];
+}
+
+/** Phase 2: generate pages for merged concepts in parallel, capturing errors. */
+async function generatePagesPhase(
+  root: string,
+  extractions: ExtractionResult[],
+  frozenSlugs: Set<string>,
+): Promise<PageGenerationResult> {
+  const merged = mergeExtractions(extractions, frozenSlugs);
+  const limit = pLimit(COMPILE_CONCURRENCY);
+  const errors: string[] = [];
+  const pages = await Promise.all(
+    merged.map((entry) => limit(async () => {
+      const writeError = await generateMergedPage(root, entry);
+      if (writeError) errors.push(writeError);
+      return entry;
+    })),
+  );
+  return { pages, errors };
+}
+
+/** Persist source state for every extraction that produced concepts. */
+async function persistExtractionStates(
+  root: string,
+  extractions: ExtractionResult[],
+): Promise<void> {
+  for (const result of extractions) {
+    if (result.concepts.length === 0) continue;
+    await persistSourceState(root, result.sourcePath, result.sourceFile, result.concepts);
+  }
+}
+
+/** Build the structured CompileResult and emit the CLI completion banner. */
+function summarizeCompile(
+  buckets: ChangeBuckets,
+  generation: PageGenerationResult,
+  extractions: ExtractionResult[],
+): CompileResult {
+  output.header("Compilation complete");
+  output.status("✓", output.success(
+    `${buckets.toCompile.length} compiled, ${buckets.unchanged.length} skipped, ${buckets.deleted.length} deleted`,
+  ));
+  if (buckets.toCompile.length > 0) {
+    output.status("→", output.dim('Next: llmwiki query "your question here"'));
   }
 
-  const toCompile = changes.filter((c) => c.status === "new" || c.status === "changed");
-  const deleted = changes.filter((c) => c.status === "deleted");
-  const unchanged = changes.filter((c) => c.status === "unchanged");
+  const errors = [...generation.errors];
+  for (const result of extractions) {
+    if (result.concepts.length === 0) {
+      errors.push(`No concepts extracted from ${result.sourceFile}`);
+    }
+  }
 
-  if (toCompile.length === 0 && deleted.length === 0) {
+  return {
+    compiled: buckets.toCompile.length,
+    skipped: buckets.unchanged.length,
+    deleted: buckets.deleted.length,
+    concepts: generation.pages.map((entry) => entry.concept.concept),
+    pages: generation.pages.map((entry) => entry.slug),
+    errors,
+  };
+}
+
+/** Inner pipeline, runs under lock protection. Returns structured CompileResult. */
+async function runCompilePipeline(root: string): Promise<CompileResult> {
+  const state = await readState(root);
+  const changes = await detectChanges(root, state);
+  augmentWithAffectedSources(changes, findAffectedSources(state, changes));
+
+  const buckets = bucketChanges(changes);
+  if (buckets.toCompile.length === 0 && buckets.deleted.length === 0) {
     output.status("✓", output.success("Nothing to compile — all sources up to date."));
-    return;
+    return { ...emptyCompileResult(), skipped: buckets.unchanged.length };
   }
 
   printChangesSummary(changes);
+  await markDeletedAsOrphaned(root, buckets.deleted, state);
 
-  // Handle deleted sources: mark their wiki pages as orphaned
+  const frozenSlugs = findFrozenSlugs(state, changes);
+  reportFrozenSlugs(frozenSlugs);
+
+  const extractions = await runExtractionPhases(root, buckets.toCompile, state, changes);
+  await freezeFailedExtractions(root, extractions, frozenSlugs);
+
+  const generation = await generatePagesPhase(root, extractions, frozenSlugs);
+  await persistExtractionStates(root, extractions);
+
+  if (frozenSlugs.size > 0) {
+    await orphanUnownedFrozenPages(root, frozenSlugs);
+  }
+  await persistFrozenSlugs(root, frozenSlugs, extractions);
+
+  await finalizeWiki(root, generation.pages);
+  return summarizeCompile(buckets, generation, extractions);
+}
+
+/** Append affected-source changes (logging each addition) to the change list. */
+function augmentWithAffectedSources(changes: SourceChange[], affected: string[]): void {
+  for (const file of affected) {
+    output.status("~", output.info(`${file} [affected by shared concept]`));
+    changes.push({ file, status: "changed" });
+  }
+}
+
+/** Mark wiki pages owned solely by deleted sources as orphaned. */
+async function markDeletedAsOrphaned(
+  root: string,
+  deleted: SourceChange[],
+  state: WikiState,
+): Promise<void> {
   for (const del of deleted) {
     await markOrphaned(root, del.file, state);
   }
+}
 
-  // Frozen slugs: shared concepts that lost a contributor (deleted source).
-  const frozenSlugs = findFrozenSlugs(state, changes);
+/** Log frozen slugs (shared concepts whose deletion-pinned content must persist). */
+function reportFrozenSlugs(frozenSlugs: Set<string>): void {
   for (const slug of frozenSlugs) {
     output.status("i", output.dim(`Frozen: ${slug} (shared with deleted source)`));
   }
+}
 
-  // Phase 1: Extract concepts for ALL sources before generating any pages.
-  // This eliminates order-dependence: we know which extractions failed
-  // before committing any page writes.
+/**
+ * Phase 1: extract concepts for the directly-changed batch, then expand to
+ * any unchanged sources whose concepts overlap with newly extracted slugs.
+ */
+async function runExtractionPhases(
+  root: string,
+  toCompile: SourceChange[],
+  state: WikiState,
+  allChanges: SourceChange[],
+): Promise<ExtractionResult[]> {
   const extractions: ExtractionResult[] = [];
   for (const change of toCompile) {
     extractions.push(await extractForSource(root, change.file));
   }
 
-  // Post-extraction dependency check: new sources may extract concepts
-  // that existing unchanged sources already own. findAffectedSources
-  // couldn't detect this earlier because new sources had no state entry.
-  const lateAffected = findLateAffectedSources(extractions, state, changes);
+  const lateAffected = findLateAffectedSources(extractions, state, allChanges);
   for (const file of lateAffected) {
     output.status("~", output.info(`${file} [shares concept with new source]`));
     extractions.push(await extractForSource(root, file));
   }
 
-  // Freeze concepts from failed extractions before page generation.
-  await freezeFailedExtractions(root, extractions, frozenSlugs);
+  return extractions;
+}
 
-  // Phase 2: Merge shared concepts across sources, then generate pages.
-  // When multiple sources extract the same concept, combine their content
-  // so the LLM sees all contributing material in a single generation call.
-  const merged = mergeExtractions(extractions, frozenSlugs);
-  const limit = pLimit(COMPILE_CONCURRENCY);
-  const pageResults = await Promise.all(
-    merged.map((entry) => limit(async () => {
-      await generateMergedPage(root, entry);
-      return entry;
-    })),
-  );
-  const allChangedSlugs = pageResults.map((e) => e.slug);
-  const allNewSlugs = pageResults
-    .filter((e) => e.concept.is_new)
-    .map((e) => e.slug);
+/** Resolve interlinks, regenerate index/MOC, refresh embeddings post-write. */
+async function finalizeWiki(root: string, pages: MergedConcept[]): Promise<void> {
+  const allChangedSlugs = pages.map((entry) => entry.slug);
+  const allNewSlugs = pages.filter((entry) => entry.concept.is_new).map((entry) => entry.slug);
 
-  // Persist state for each successfully extracted source.
-  for (const result of extractions) {
-    if (result.concepts.length === 0) continue;
-    await persistSourceState(root, result.sourcePath, result.sourceFile, result.concepts);
-  }
-
-  // Orphan frozen pages that lost all owners after recompilation.
-  if (frozenSlugs.size > 0) {
-    await orphanUnownedFrozenPages(root, frozenSlugs);
-  }
-
-  // Persist frozen slugs: unfreeze any that are now safe to regenerate
-  // (all current owners compiled and extracted them), keep the rest.
-  await persistFrozenSlugs(root, frozenSlugs, extractions);
-
-  // Interlink resolution: outbound on changed, inbound for new titles
   if (allChangedSlugs.length > 0) {
     output.status("🔗", output.info("Resolving interlinks..."));
     await resolveLinks(root, allChangedSlugs, allNewSlugs);
@@ -168,14 +278,6 @@ async function runCompilePipeline(root: string): Promise<void> {
   await generateIndex(root);
   await generateMOC(root);
   await safelyUpdateEmbeddings(root, allChangedSlugs);
-
-  output.header("Compilation complete");
-  output.status("✓", output.success(
-    `${toCompile.length} compiled, ${unchanged.length} skipped, ${deleted.length} deleted`,
-  ));
-  if (toCompile.length > 0) {
-    output.status("→", output.dim('Next: llmwiki query "your question here"'));
-  }
 }
 
 /** Print a summary of detected source file changes. */
@@ -269,7 +371,7 @@ function mergeExtractions(
 async function generateMergedPage(
   root: string,
   entry: MergedConcept,
-): Promise<void> {
+): Promise<string | null> {
   const pagePath = path.join(root, CONCEPTS_DIR, `${entry.slug}.md`);
   const existingPage = await safeReadFile(pagePath);
   const relatedPages = await loadRelatedPages(root, entry.slug);
@@ -303,7 +405,7 @@ async function generateMergedPage(
   addObsidianMeta(frontmatterFields, entry.concept.concept, entry.concept.tags ?? []);
   const frontmatter = buildFrontmatter(frontmatterFields);
   const fullPage = `${frontmatter}\n\n${pageBody}\n`;
-  await writePageIfValid(pagePath, fullPage, entry.concept.concept);
+  return await writePageIfValid(pagePath, fullPage, entry.concept.concept);
 }
 
 /**
@@ -373,13 +475,14 @@ async function writePageIfValid(
   pagePath: string,
   content: string,
   conceptTitle: string,
-): Promise<void> {
+): Promise<string | null> {
   if (!validateWikiPage(content)) {
     output.status("!", output.warn(`Invalid page for "${conceptTitle}" — skipped.`));
-    return;
+    return `Invalid page for "${conceptTitle}" — failed validation`;
   }
 
   await atomicWrite(pagePath, content);
+  return null;
 }
 
 /**
