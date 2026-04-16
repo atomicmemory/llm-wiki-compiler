@@ -14,6 +14,7 @@ import compileCommand from "./commands/compile.js";
 import queryCommand from "./commands/query.js";
 import watchCommand from "./commands/watch.js";
 import lintCommand from "./commands/lint.js";
+import { startMCPServer } from "./mcp/server.js";
 import { DEFAULT_PROVIDER } from "./utils/constants.js";
 import { resolveAnthropicAuthFromEnv } from "./utils/claude-settings.js";
 
@@ -85,6 +86,21 @@ program
   .action(async () => {
     try {
       await lintCommand();
+    } catch (err) {
+      console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command("serve")
+  .description("Start an MCP server exposing wiki tools and resources over stdio")
+  .option("--root <dir>", "Project root directory", process.cwd())
+  .action(async (options: { root: string }) => {
+    try {
+      // Per-tool credential checks happen inside the MCP layer so read-only
+      // tools and ingest still work without an API key.
+      await startMCPServer({ root: options.root, version });
     } catch (err) {
       console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
       process.exit(1);

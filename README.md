@@ -125,6 +125,7 @@ Pages include source attribution in frontmatter. Paragraphs are annotated with `
 | `llmwiki query "question" --save` | Answer and save the result as a wiki page |
 | `llmwiki lint` | Check wiki quality (broken links, orphans, empty pages, etc.) |
 | `llmwiki watch` | Auto-recompile when `sources/` changes |
+| `llmwiki serve [--root <dir>]` | Start an MCP server exposing wiki tools to AI agents |
 
 ## Output
 
@@ -150,6 +151,62 @@ llmwiki query "What terms did Andrej coin?"
 
 See `examples/basic/` in the repo for pre-generated output you can browse without an API key.
 
+## MCP Server
+
+llmwiki ships an MCP (Model Context Protocol) server so AI agents (Claude Desktop, Cursor, Claude Code, etc.) can drive the full pipeline directly: ingest sources, compile, query, search, lint, and read pages — without scraping CLI output.
+
+Where [llm-wiki-kit](https://github.com/iamsashank09/llm-wiki-kit) gives agents raw CRUD against wiki pages, llmwiki exposes the **automated pipelines**: agents get intelligent compilation, incremental change detection, and semantic query routing built in.
+
+### Setup
+
+Start the server (stdio transport, no API key required at startup):
+
+```bash
+llmwiki serve --root /path/to/your/wiki-project
+```
+
+### Claude Desktop / Cursor configuration
+
+Add to your client's MCP config (e.g. `claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "llmwiki": {
+      "command": "npx",
+      "args": ["llm-wiki-compiler", "serve", "--root", "/path/to/wiki-project"],
+      "env": {
+        "ANTHROPIC_API_KEY": "sk-ant-..."
+      }
+    }
+  }
+}
+```
+
+Tools that need an LLM (`compile_wiki`, `query_wiki`, `search_pages`) check for a configured provider on each call. Read-only tools (`read_page`, `lint_wiki`, `wiki_status`) and `ingest_source` work without any credentials.
+
+### Tools
+
+| Tool | What it does |
+|------|--------------|
+| `ingest_source` | Fetch a URL or local file into `sources/`. |
+| `compile_wiki` | Run the incremental compile pipeline; returns counts, slugs, errors. |
+| `query_wiki` | Two-step grounded answer with optional `--save`. |
+| `search_pages` | Return full content of pages relevant to a question. |
+| `read_page` | Read a single page by slug (concepts/ then queries/). |
+| `lint_wiki` | Run quality checks; returns structured diagnostics. |
+| `wiki_status` | Page count, source count, orphans, pending changes (read-only). |
+
+### Resources
+
+| URI | Returns |
+|-----|---------|
+| `llmwiki://index` | Full `wiki/index.md` content. |
+| `llmwiki://concept/{slug}` | A single concept page (frontmatter + body). |
+| `llmwiki://query/{slug}` | A single saved query page. |
+| `llmwiki://sources` | List of ingested source files with metadata. |
+| `llmwiki://state` | Compilation state (per-source hashes, last compile times). |
+
 ## Limitations
 
 Early software. Best for small, high-signal corpora (a few dozen sources). Query routing is index-based.
@@ -168,6 +225,7 @@ Karpathy describes an abstract pattern for turning raw data into compiled knowle
 | Output filing (save answers back) | `llmwiki query --save` | Implemented |
 | Auto-recompile | `llmwiki watch` | Implemented |
 | Linting / health-check pass | `llmwiki lint` | Implemented |
+| Agent integration | `llmwiki serve` (MCP server) | Implemented |
 | Image support | — | Not yet implemented |
 | Marp slides | — | Not yet implemented |
 | Fine-tuning | — | Not yet implemented |
@@ -176,10 +234,13 @@ Karpathy describes an abstract pattern for turning raw data into compiled knowle
 
 - ✅ Better provenance (paragraph-level source attribution)
 - ✅ Linting pass for wiki quality checks
-- Multi-provider support (OpenAI, local models)
-- Larger-corpus query strategy (semantic search, embeddings)
-- Deeper Obsidian integration
-- MCP server for agent integration
+- ✅ Multi-provider support (OpenAI, Ollama, MiniMax)
+- ✅ Larger-corpus query strategy (semantic search, embeddings)
+- ✅ Deeper Obsidian integration (tags, aliases, Map of Content)
+- ✅ MCP server for agent integration
+- Image support
+- Marp slides
+- Fine-tuning
 
 If you want to contribute, these are the highest-leverage areas right now. Issues and PRs are welcome.
 
