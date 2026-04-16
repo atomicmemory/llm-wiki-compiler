@@ -43,3 +43,14 @@ export const STATE_FILE = ".llmwiki/state.json";
 export const LOCK_FILE = ".llmwiki/lock";
 export const INDEX_FILE = "wiki/index.md";
 export const MOC_FILE = "wiki/MOC.md";
+export const EMBEDDINGS_FILE = ".llmwiki/embeddings.json";
+
+/** Number of most similar pages to return from embedding-based pre-filter. */
+export const EMBEDDING_TOP_K = 15;
+
+/** Embedding model to use per provider. */
+export const EMBEDDING_MODELS: Record<string, string> = {
+  anthropic: "voyage-3-lite",
+  openai: "text-embedding-3-small",
+  ollama: "nomic-embed-text",
+};

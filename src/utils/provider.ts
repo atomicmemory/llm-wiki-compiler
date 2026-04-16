@@ -45,6 +45,8 @@ export interface LLMProvider {
     tools: LLMTool[],
     maxTokens: number,
   ): Promise<string>;
+  /** Return a single embedding vector for the given text. */
+  embed(text: string): Promise<number[]>;
 }
 
 const SUPPORTED_PROVIDERS: ReadonlySet<string> = new Set(["anthropic", "openai", "ollama", "minimax"]);
@@ -110,4 +112,9 @@ function getProviderName(): string {
     );
   }
   return providerName;
+}
+
+/** Expose the resolved provider name for callers that need model lookup. */
+export function getActiveProviderName(): string {
+  return getProviderName();
 }

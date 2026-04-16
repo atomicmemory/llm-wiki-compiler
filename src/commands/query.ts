@@ -19,6 +19,7 @@ import { atomicWrite, safeReadFile, slugify, buildFrontmatter, parseFrontmatter 
 import { generateIndex } from "../compiler/indexgen.js";
 import * as output from "../utils/output.js";
 import { QUERY_PAGE_LIMIT, INDEX_FILE, CONCEPTS_DIR, QUERIES_DIR } from "../utils/constants.js";
+import { findRelevantPages, updateEmbeddings } from "../utils/embeddings.js";
 
 /** Directories to search when loading selected pages, in priority order. */
 const PAGE_DIRS = [CONCEPTS_DIR, QUERIES_DIR];
@@ -81,6 +82,55 @@ async function selectPages(
     };
   } catch {
     return { pages: [], reasoning: "Failed to parse page selection response" };
+  }
+}
+
+/** Render a list of candidate pages in the same bullet format selectPages() consumes. */
+function buildFilteredIndex(
+  candidates: Array<{ slug: string; title: string; summary: string }>,
+): string {
+  return candidates
+    .map((entry) => `- **${entry.slug}**: ${entry.title} — ${entry.summary}`)
+    .join("\n");
+}
+
+interface SelectedPages {
+  pages: string[];
+  rawPages: string[];
+  reasoning: string;
+}
+
+/**
+ * Pick relevant pages using embedding pre-filter when available.
+ * Falls back to sending the full wiki index when no embeddings store exists
+ * or when the embedding call fails.
+ */
+async function selectRelevantPages(root: string, question: string): Promise<SelectedPages> {
+  const candidates = await tryFindRelevantPages(root, question);
+
+  if (candidates.length > 0) {
+    const filteredIndex = buildFilteredIndex(candidates);
+    const { pages: rawPages, reasoning } = await selectPages(question, filteredIndex);
+    // Tool output holds slugs directly in the semantic path — no slugify needed.
+    return { pages: rawPages, rawPages, reasoning };
+  }
+
+  const indexContent = await safeReadFile(path.join(root, INDEX_FILE));
+  const { pages: rawPages, reasoning } = await selectPages(question, indexContent);
+  return { pages: rawPages.map((p) => slugify(p)), rawPages, reasoning };
+}
+
+/** Embedding-based candidate lookup that never throws. */
+async function tryFindRelevantPages(
+  root: string,
+  question: string,
+): Promise<Array<{ slug: string; title: string; summary: string }>> {
+  try {
+    return await findRelevantPages(root, question);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    output.status("!", output.dim(`Semantic pre-filter unavailable (${message}); using full index.`));
+    return [];
   }
 }
 
@@ -184,6 +234,15 @@ async function saveQueryPage(root: string, question: string, answer: string): Pr
   // Regenerate the index so the saved query is immediately discoverable
   // by the next query's page-selection step.
   await generateIndex(root);
+
+  // Index the new query so semantic search retrieves it on the next question.
+  // Non-critical: embedding failures (e.g. missing VOYAGE_API_KEY) don't block save.
+  try {
+    await updateEmbeddings(root, [slug]);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    output.status("!", output.warn(`Skipped embeddings update: ${message}`));
+  }
 }
 
 /**
@@ -205,9 +264,7 @@ export default async function queryCommand(
   // Step 1: Select relevant pages
   output.header("Selecting relevant pages");
 
-  const indexContent = await safeReadFile(path.join(root, INDEX_FILE));
-  const { pages: rawPages, reasoning } = await selectPages(question, indexContent);
-  const pages = rawPages.map((p) => slugify(p));
+  const { pages, rawPages, reasoning } = await selectRelevantPages(root, question);
 
   output.status("i", output.dim(`Reasoning: ${reasoning}`));
   output.status("*", output.info(`Selected ${pages.length} page(s): ${rawPages.join(", ")}`));

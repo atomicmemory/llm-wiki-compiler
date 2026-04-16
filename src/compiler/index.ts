@@ -40,6 +40,7 @@ import { markOrphaned, orphanUnownedFrozenPages } from "./orphan.js";
 import { resolveLinks } from "./resolver.js";
 import { generateIndex } from "./indexgen.js";
 import { addObsidianMeta, generateMOC } from "./obsidian.js";
+import { updateEmbeddings } from "../utils/embeddings.js";
 import * as output from "../utils/output.js";
 import {
   COMPILE_CONCURRENCY,
@@ -166,6 +167,7 @@ async function runCompilePipeline(root: string): Promise<void> {
 
   await generateIndex(root);
   await generateMOC(root);
+  await safelyUpdateEmbeddings(root, allChangedSlugs);
 
   output.header("Compilation complete");
   output.status("✓", output.success(
@@ -378,6 +380,20 @@ async function writePageIfValid(
   }
 
   await atomicWrite(pagePath, content);
+}
+
+/**
+ * Refresh the embeddings store without failing compilation.
+ * Semantic search is a non-critical enhancement — missing API keys or
+ * transient provider errors should produce a warning, not a broken build.
+ */
+async function safelyUpdateEmbeddings(root: string, changedSlugs: string[]): Promise<void> {
+  try {
+    await updateEmbeddings(root, changedSlugs);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    output.status("!", output.warn(`Skipped embeddings update: ${message}`));
+  }
 }
 
 /**

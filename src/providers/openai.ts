@@ -7,6 +7,7 @@
 
 import OpenAI from "openai";
 import type { LLMProvider, LLMMessage, LLMTool } from "../utils/provider.js";
+import { EMBEDDING_MODELS } from "../utils/constants.js";
 
 /** Translate an Anthropic-style LLMTool to an OpenAI ChatCompletionTool. */
 export function translateToolToOpenAI(
@@ -97,5 +98,27 @@ export class OpenAIProvider implements LLMProvider {
     }
 
     return response.choices[0]?.message?.content ?? "";
+  }
+
+  /**
+   * Produce a single embedding vector via the OpenAI embeddings API.
+   * Subclasses (e.g. Ollama) override embeddingModel() to pick a different model.
+   */
+  async embed(text: string): Promise<number[]> {
+    const response = await this.client.embeddings.create({
+      model: this.embeddingModel(),
+      input: text,
+    });
+
+    const vector = response.data[0]?.embedding;
+    if (!Array.isArray(vector)) {
+      throw new Error("OpenAI embeddings response did not include a vector.");
+    }
+    return vector;
+  }
+
+  /** Default embedding model for this provider. Subclasses may override. */
+  protected embeddingModel(): string {
+    return EMBEDDING_MODELS.openai;
   }
 }
