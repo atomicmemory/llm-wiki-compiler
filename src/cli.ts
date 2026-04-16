@@ -96,6 +96,7 @@ const PROVIDER_KEY_VARS: Record<string, string | null> = {
   anthropic: "ANTHROPIC_API_KEY",
   openai: "OPENAI_API_KEY",
   ollama: null,
+  minimax: "MINIMAX_API_KEY",
 };
 
 /** Exit with a helpful message if the selected provider's API key is missing. */

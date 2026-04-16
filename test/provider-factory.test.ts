@@ -11,6 +11,7 @@ import { getProvider } from "../src/utils/provider.js";
 import { AnthropicProvider } from "../src/providers/anthropic.js";
 import { OpenAIProvider } from "../src/providers/openai.js";
 import { OllamaProvider } from "../src/providers/ollama.js";
+import { MiniMaxProvider } from "../src/providers/minimax.js";
 
 const TEST_SETTINGS_PATH_ENV = "LLMWIKI_CLAUDE_SETTINGS_PATH";
 const tempDirs: string[] = [];
@@ -51,6 +52,7 @@ describe("getProvider", () => {
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.ANTHROPIC_AUTH_TOKEN;
     delete process.env[TEST_SETTINGS_PATH_ENV];
+    delete process.env.MINIMAX_API_KEY;
 
     for (const dir of tempDirs.splice(0)) {
       rmSync(dir, { recursive: true, force: true });
@@ -107,6 +109,19 @@ describe("getProvider", () => {
   it("throws for unknown provider", () => {
     process.env.LLMWIKI_PROVIDER = "gemini";
     expect(() => getProvider()).toThrow('Unknown provider "gemini"');
+  });
+
+  it("returns MiniMaxProvider when LLMWIKI_PROVIDER=minimax", () => {
+    process.env.LLMWIKI_PROVIDER = "minimax";
+    process.env.MINIMAX_API_KEY = "test-key";
+    const provider = getProvider();
+    expect(provider).toBeInstanceOf(MiniMaxProvider);
+  });
+
+  it("throws when MINIMAX_API_KEY is absent for minimax provider", () => {
+    process.env.LLMWIKI_PROVIDER = "minimax";
+    delete process.env.MINIMAX_API_KEY;
+    expect(() => getProvider()).toThrow("MINIMAX_API_KEY");
   });
 
   it("respects LLMWIKI_MODEL override", () => {
