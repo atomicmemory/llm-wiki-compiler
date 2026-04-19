@@ -3,18 +3,22 @@
  * Avoids real network calls — we test the pure helpers and JSON roundtrips.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { mkdtemp, writeFile, mkdir } from "fs/promises";
 import path from "path";
 import os from "os";
 import {
   cosineSimilarity,
   findTopK,
+  findRelevantPages,
   readEmbeddingStore,
+  resolveEmbeddingModel,
+  updateEmbeddings,
   writeEmbeddingStore,
   type EmbeddingStore,
   type EmbeddingEntry,
 } from "../src/utils/embeddings.js";
+import { OpenAIProvider } from "../src/providers/openai.js";
 
 const STORE_PATH = ".llmwiki/embeddings.json";
 
@@ -42,6 +46,19 @@ async function makeRoot(): Promise<string> {
   await mkdir(path.join(root, ".llmwiki"), { recursive: true });
   return root;
 }
+
+async function writeConceptPage(root: string, slug: string): Promise<void> {
+  await mkdir(path.join(root, "wiki/concepts"), { recursive: true });
+  const content = `---\ntitle: ${slug}\nsummary: Summary for ${slug}\n---\n\nBody`;
+  await writeFile(path.join(root, "wiki/concepts", `${slug}.md`), content);
+}
+
+afterEach(() => {
+  delete process.env.LLMWIKI_PROVIDER;
+  delete process.env.LLMWIKI_EMBEDDING_MODEL;
+  delete process.env.OPENAI_API_KEY;
+  vi.restoreAllMocks();
+});
 
 describe("cosineSimilarity", () => {
   it("returns 1 for identical vectors", () => {
@@ -136,5 +153,39 @@ describe("embedding store persistence", () => {
     // Create an unrelated file to confirm readEmbeddingStore checks the file, not the dir.
     await writeFile(path.join(root, ".llmwiki/other.json"), "{}");
     expect(await readEmbeddingStore(root)).toBeNull();
+  });
+});
+
+describe("embedding model selection", () => {
+  it("uses LLMWIKI_EMBEDDING_MODEL when configured", () => {
+    process.env.LLMWIKI_EMBEDDING_MODEL = "local-embed";
+    expect(resolveEmbeddingModel()).toBe("local-embed");
+  });
+
+  it("ignores a mismatched store during semantic lookup", async () => {
+    const root = await makeRoot();
+    process.env.LLMWIKI_EMBEDDING_MODEL = "new-model";
+    await writeEmbeddingStore(root, makeStore([makeEntry("alpha", [1, 0])]));
+
+    const result = await findRelevantPages(root, "alpha");
+
+    expect(result).toEqual([]);
+  });
+
+  it("rebuilds live page embeddings when the stored model changes", async () => {
+    const root = await makeRoot();
+    process.env.LLMWIKI_PROVIDER = "openai";
+    process.env.LLMWIKI_EMBEDDING_MODEL = "new-model";
+    process.env.OPENAI_API_KEY = "test-key";
+    vi.spyOn(OpenAIProvider.prototype, "embed").mockResolvedValue([0.9, 0.1]);
+    await writeConceptPage(root, "alpha");
+    await writeEmbeddingStore(root, makeStore([makeEntry("alpha", [1, 0])]));
+
+    await updateEmbeddings(root, []);
+    const store = await readEmbeddingStore(root);
+
+    expect(store?.model).toBe("new-model");
+    expect(store?.entries).toHaveLength(1);
+    expect(store?.entries[0].vector).toEqual([0.9, 0.1]);
   });
 });

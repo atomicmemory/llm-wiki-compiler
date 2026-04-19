@@ -9,6 +9,14 @@ import OpenAI from "openai";
 import type { LLMProvider, LLMMessage, LLMTool } from "../utils/provider.js";
 import { EMBEDDING_MODELS } from "../utils/constants.js";
 
+/** Construction options for an OpenAI-compatible provider. */
+interface OpenAIProviderOptions {
+  baseURL?: string;
+  apiKey?: string;
+  embeddingsBaseURL?: string;
+  embeddingModel?: string;
+}
+
 /** Translate an Anthropic-style LLMTool to an OpenAI ChatCompletionTool. */
 export function translateToolToOpenAI(
   tool: LLMTool,
@@ -26,17 +34,23 @@ export function translateToolToOpenAI(
 /** OpenAI-backed LLM provider. */
 export class OpenAIProvider implements LLMProvider {
   protected readonly client: OpenAI;
+  protected readonly embeddingsClient: OpenAI;
   protected readonly model: string;
+  protected readonly configuredEmbeddingModel?: string;
 
-  constructor(model: string, baseURL?: string, apiKey?: string) {
+  constructor(model: string, options: OpenAIProviderOptions = {}) {
     this.model = model;
+    this.configuredEmbeddingModel = options.embeddingModel;
     // The OpenAI SDK validates OPENAI_API_KEY at construction time.
     // Pass the key explicitly so the provider controls when validation happens.
-    const resolvedKey = apiKey ?? process.env.OPENAI_API_KEY ?? "";
+    const resolvedKey = options.apiKey ?? process.env.OPENAI_API_KEY ?? "";
     this.client = new OpenAI({
       apiKey: resolvedKey,
-      ...(baseURL ? { baseURL } : {}),
+      baseURL: options.baseURL ?? null,
     });
+    this.embeddingsClient = options.embeddingsBaseURL
+      ? new OpenAI({ apiKey: resolvedKey, baseURL: options.embeddingsBaseURL })
+      : this.client;
   }
 
   /** Send a single non-streaming completion request. */
@@ -105,7 +119,7 @@ export class OpenAIProvider implements LLMProvider {
    * Subclasses (e.g. Ollama) override embeddingModel() to pick a different model.
    */
   async embed(text: string): Promise<number[]> {
-    const response = await this.client.embeddings.create({
+    const response = await this.embeddingsClient.embeddings.create({
       model: this.embeddingModel(),
       input: text,
     });
@@ -119,6 +133,6 @@ export class OpenAIProvider implements LLMProvider {
 
   /** Default embedding model for this provider. Subclasses may override. */
   protected embeddingModel(): string {
-    return EMBEDDING_MODELS.openai;
+    return this.configuredEmbeddingModel ?? EMBEDDING_MODELS.openai;
   }
 }

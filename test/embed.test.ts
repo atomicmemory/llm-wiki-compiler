@@ -19,7 +19,23 @@ interface StubCall {
 
 function stubOpenAIClient(provider: OpenAIProvider, vector: number[]): StubCall[] {
   const calls: StubCall[] = [];
-  const fakeClient = {
+  const fakeClient = makeEmbeddingStub(calls, vector);
+  // The OpenAI SDK clients are protected fields; override them for testing.
+  Reflect.set(provider, "client", fakeClient);
+  Reflect.set(provider, "embeddingsClient", fakeClient);
+  return calls;
+}
+
+function stubSplitClients(provider: OpenAIProvider): { chatCalls: StubCall[]; embedCalls: StubCall[] } {
+  const chatCalls: StubCall[] = [];
+  const embedCalls: StubCall[] = [];
+  Reflect.set(provider, "client", makeEmbeddingStub(chatCalls, [9]));
+  Reflect.set(provider, "embeddingsClient", makeEmbeddingStub(embedCalls, [1, 2, 3]));
+  return { chatCalls, embedCalls };
+}
+
+function makeEmbeddingStub(calls: StubCall[], vector: number[]): unknown {
+  return {
     embeddings: {
       create: async ({ model, input }: { model: string; input: string }) => {
         calls.push({ model, input });
@@ -27,14 +43,11 @@ function stubOpenAIClient(provider: OpenAIProvider, vector: number[]): StubCall[
       },
     },
   };
-  // The OpenAI SDK client is a protected field; override for testing.
-  Reflect.set(provider, "client", fakeClient);
-  return calls;
 }
 
 describe("OpenAIProvider.embed", () => {
   it("calls the embeddings API with text-embedding-3-small and returns the vector", async () => {
-    const provider = new OpenAIProvider("gpt-4o", undefined, "test-key");
+    const provider = new OpenAIProvider("gpt-4o", { apiKey: "test-key" });
     const expected = [0.1, 0.2, 0.3];
     const calls = stubOpenAIClient(provider, expected);
 
@@ -46,9 +59,42 @@ describe("OpenAIProvider.embed", () => {
     expect(calls[0].input).toBe("hello world");
   });
 
+  it("reuses the primary client when no embeddings URL is configured", () => {
+    const provider = new OpenAIProvider("gpt-4o", { apiKey: "test-key" });
+    expect(Reflect.get(provider, "embeddingsClient")).toBe(Reflect.get(provider, "client"));
+  });
+
+  it("uses a separate embeddings client when an embeddings URL is configured", async () => {
+    const provider = new OpenAIProvider("gpt-4o", {
+      apiKey: "test-key",
+      embeddingsBaseURL: "http://localhost:8081/v1",
+    });
+    const { chatCalls, embedCalls } = stubSplitClients(provider);
+
+    const result = await provider.embed("separate endpoint");
+
+    expect(result).toEqual([1, 2, 3]);
+    expect(chatCalls).toEqual([]);
+    expect(embedCalls).toEqual([
+      { model: EMBEDDING_MODELS.openai, input: "separate endpoint" },
+    ]);
+  });
+
+  it("uses a configured embedding model when provided", async () => {
+    const provider = new OpenAIProvider("gpt-4o", {
+      apiKey: "test-key",
+      embeddingModel: "local-embed",
+    });
+    const calls = stubOpenAIClient(provider, [0.4]);
+
+    await provider.embed("custom model");
+
+    expect(calls[0].model).toBe("local-embed");
+  });
+
   it("throws a clear error when the response is missing a vector", async () => {
-    const provider = new OpenAIProvider("gpt-4o", undefined, "test-key");
-    Reflect.set(provider, "client", {
+    const provider = new OpenAIProvider("gpt-4o", { apiKey: "test-key" });
+    Reflect.set(provider, "embeddingsClient", {
       embeddings: {
         create: async () => ({ data: [] }),
       },

@@ -13,6 +13,6 @@ const MINIMAX_BASE_URL = "https://api.minimax.io/v1";
 /** MiniMax-backed LLM provider using the OpenAI-compatible endpoint. */
 export class MiniMaxProvider extends OpenAIProvider {
   constructor(model: string, apiKey: string) {
-    super(model, MINIMAX_BASE_URL, apiKey);
+    super(model, { baseURL: MINIMAX_BASE_URL, apiKey });
   }
 }

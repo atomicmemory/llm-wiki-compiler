@@ -66,6 +66,43 @@ Example with zero exports (Claude Code already configured):
 llmwiki compile
 ```
 
+### OpenAI-Compatible Local Servers
+
+Use the OpenAI provider for local OpenAI-compatible servers such as
+`llama-server`. `OPENAI_BASE_URL` is used for chat/tool calls, and
+`OPENAI_EMBEDDINGS_BASE_URL` is optional. Set it only when embeddings are
+served from a different endpoint; when unset, embeddings use the same client
+and base URL as chat. Include `/v1` in custom URLs.
+
+Split endpoint example:
+
+```bash
+export LLMWIKI_PROVIDER=openai
+export LLMWIKI_MODEL=qwen3.6-35b
+export LLMWIKI_EMBEDDING_MODEL=text-embedding-model
+export OPENAI_API_KEY=sk-local
+export OPENAI_BASE_URL=http://host_url:port/v1
+export OPENAI_EMBEDDINGS_BASE_URL=http://host_url:port/v1
+```
+
+`OPENAI_API_KEY` is still required by the CLI and OpenAI SDK. For local
+servers that do not check authentication, any dummy value is sufficient.
+
+### Ollama
+
+Ollama uses its OpenAI-compatible endpoint. Set `OLLAMA_HOST` for chat and
+optionally set `OLLAMA_EMBEDDINGS_HOST` only when embeddings are served from a
+different endpoint. When unset, embeddings use `OLLAMA_HOST`. Include `/v1` in
+custom URLs.
+
+```bash
+export LLMWIKI_PROVIDER=ollama
+export LLMWIKI_MODEL=llama3.1
+export LLMWIKI_EMBEDDING_MODEL=nomic-embed-text
+export OLLAMA_HOST=http://ollama_host:11434/v1
+export OLLAMA_EMBEDDINGS_HOST=http://ollama_host:11435/v1
+```
+
 ## Why not just RAG?
 
 RAG retrieves chunks at query time. Every question re-discovers the same relationships from scratch. Nothing accumulates.

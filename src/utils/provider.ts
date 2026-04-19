@@ -65,17 +65,27 @@ export function getProvider(): LLMProvider {
     case "anthropic":
       return getAnthropicProvider();
     case "openai":
-      return new OpenAIProvider(getModelForProvider("openai"));
+      return new OpenAIProvider(getModelForProvider("openai"), {
+        baseURL: readOptionalEnv("OPENAI_BASE_URL"),
+        embeddingsBaseURL: readOptionalEnv("OPENAI_EMBEDDINGS_BASE_URL"),
+        embeddingModel: readOptionalEnv("LLMWIKI_EMBEDDING_MODEL"),
+      });
     case "ollama":
-      return new OllamaProvider(
-        getModelForProvider("ollama"),
-        process.env.OLLAMA_HOST ?? OLLAMA_DEFAULT_HOST,
-      );
+      return new OllamaProvider(getModelForProvider("ollama"), {
+        baseURL: readOptionalEnv("OLLAMA_HOST") ?? OLLAMA_DEFAULT_HOST,
+        embeddingsBaseURL: readOptionalEnv("OLLAMA_EMBEDDINGS_HOST"),
+        embeddingModel: readOptionalEnv("LLMWIKI_EMBEDDING_MODEL"),
+      });
     case "minimax":
       return getMiniMaxProvider();
     default:
       throw new Error(`Unhandled provider: ${providerName}`);
   }
+}
+
+function readOptionalEnv(name: string): string | undefined {
+  const value = process.env[name]?.trim();
+  return value ? value : undefined;
 }
 
 function getModelForProvider(providerName: "openai" | "ollama" | "minimax"): string {

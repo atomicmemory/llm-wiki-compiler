@@ -44,13 +44,23 @@ function expectAnthropicModel(expectedModel: string): void {
   expect(Reflect.get(provider, "model")).toBe(expectedModel);
 }
 
+function expectClientBaseURL(provider: object, field: string, expected: string): void {
+  expect(Reflect.get(Reflect.get(provider, field), "baseURL")).toBe(expected);
+}
+
 describe("getProvider", () => {
   afterEach(() => {
     delete process.env.LLMWIKI_PROVIDER;
     delete process.env.LLMWIKI_MODEL;
+    delete process.env.LLMWIKI_EMBEDDING_MODEL;
     delete process.env.ANTHROPIC_BASE_URL;
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.ANTHROPIC_AUTH_TOKEN;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_BASE_URL;
+    delete process.env.OPENAI_EMBEDDINGS_BASE_URL;
+    delete process.env.OLLAMA_HOST;
+    delete process.env.OLLAMA_EMBEDDINGS_HOST;
     delete process.env[TEST_SETTINGS_PATH_ENV];
     delete process.env.MINIMAX_API_KEY;
 
@@ -132,6 +142,47 @@ describe("getProvider", () => {
     // The model is stored as a protected field; verify it was accepted
     // by checking the provider was created without throwing
     expect(provider).toBeDefined();
+  });
+
+  it("passes OpenAI chat and embedding base URLs separately", () => {
+    process.env.LLMWIKI_PROVIDER = "openai";
+    process.env.OPENAI_BASE_URL = "http://localhost:8080/v1";
+    process.env.OPENAI_EMBEDDINGS_BASE_URL = "http://localhost:8081/v1";
+    process.env.LLMWIKI_EMBEDDING_MODEL = "local-embed";
+
+    const provider = getProvider();
+
+    expect(provider).toBeInstanceOf(OpenAIProvider);
+    expectClientBaseURL(provider, "client", "http://localhost:8080/v1");
+    expectClientBaseURL(provider, "embeddingsClient", "http://localhost:8081/v1");
+    expect(Reflect.get(provider, "configuredEmbeddingModel")).toBe("local-embed");
+  });
+
+  it("passes Ollama chat and embedding hosts separately", () => {
+    process.env.LLMWIKI_PROVIDER = "ollama";
+    process.env.OLLAMA_HOST = "http://localhost:11434/v1";
+    process.env.OLLAMA_EMBEDDINGS_HOST = "http://localhost:11435/v1";
+    process.env.LLMWIKI_EMBEDDING_MODEL = "nomic-local";
+
+    const provider = getProvider();
+
+    expect(provider).toBeInstanceOf(OllamaProvider);
+    expectClientBaseURL(provider, "client", "http://localhost:11434/v1");
+    expectClientBaseURL(provider, "embeddingsClient", "http://localhost:11435/v1");
+    expect(Reflect.get(provider, "configuredEmbeddingModel")).toBe("nomic-local");
+  });
+
+  it("ignores whitespace-only optional OpenAI endpoint vars", () => {
+    process.env.LLMWIKI_PROVIDER = "openai";
+    process.env.OPENAI_BASE_URL = "  ";
+    process.env.OPENAI_EMBEDDINGS_BASE_URL = "  ";
+    process.env.LLMWIKI_EMBEDDING_MODEL = "  ";
+
+    const provider = getProvider();
+
+    expect(provider).toBeInstanceOf(OpenAIProvider);
+    expect(Reflect.get(provider, "embeddingsClient")).toBe(Reflect.get(provider, "client"));
+    expect(Reflect.get(provider, "configuredEmbeddingModel")).toBeUndefined();
   });
 
   it("ignores anthropic base url for non-anthropic providers", () => {

@@ -8,14 +8,26 @@
 import { OpenAIProvider } from "./openai.js";
 import { EMBEDDING_MODELS } from "../utils/constants.js";
 
+/** Construction options for an Ollama-compatible provider. */
+interface OllamaProviderOptions {
+  baseURL: string;
+  embeddingsBaseURL?: string;
+  embeddingModel?: string;
+}
+
 /** Ollama-backed LLM provider using the OpenAI-compatible endpoint. */
 export class OllamaProvider extends OpenAIProvider {
-  constructor(model: string, baseURL: string) {
-    super(model, baseURL, "ollama");
+  constructor(model: string, options: OllamaProviderOptions) {
+    super(model, {
+      baseURL: options.baseURL,
+      apiKey: "ollama",
+      embeddingsBaseURL: options.embeddingsBaseURL,
+      embeddingModel: options.embeddingModel,
+    });
   }
 
   /** Ollama ships a dedicated embedding model (nomic-embed-text). */
   protected override embeddingModel(): string {
-    return EMBEDDING_MODELS.ollama;
+    return this.configuredEmbeddingModel ?? EMBEDDING_MODELS.ollama;
   }
 }
