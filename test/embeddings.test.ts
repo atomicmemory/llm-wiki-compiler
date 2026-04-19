@@ -19,6 +19,7 @@ import {
   type EmbeddingEntry,
 } from "../src/utils/embeddings.js";
 import { OpenAIProvider } from "../src/providers/openai.js";
+import { EMBEDDING_MODELS } from "../src/utils/constants.js";
 
 const STORE_PATH = ".llmwiki/embeddings.json";
 
@@ -157,13 +158,21 @@ describe("embedding store persistence", () => {
 });
 
 describe("embedding model selection", () => {
-  it("uses LLMWIKI_EMBEDDING_MODEL when configured", () => {
+  it("uses LLMWIKI_EMBEDDING_MODEL when OpenAI is active", () => {
+    process.env.LLMWIKI_PROVIDER = "openai";
     process.env.LLMWIKI_EMBEDDING_MODEL = "local-embed";
     expect(resolveEmbeddingModel()).toBe("local-embed");
   });
 
+  it("ignores LLMWIKI_EMBEDDING_MODEL when Anthropic is active", () => {
+    process.env.LLMWIKI_PROVIDER = "anthropic";
+    process.env.LLMWIKI_EMBEDDING_MODEL = "local-embed";
+    expect(resolveEmbeddingModel()).toBe(EMBEDDING_MODELS.anthropic);
+  });
+
   it("ignores a mismatched store during semantic lookup", async () => {
     const root = await makeRoot();
+    process.env.LLMWIKI_PROVIDER = "openai";
     process.env.LLMWIKI_EMBEDDING_MODEL = "new-model";
     await writeEmbeddingStore(root, makeStore([makeEntry("alpha", [1, 0])]));
 

@@ -175,9 +175,12 @@ async function embedPages(
 
 /** Choose the active embedding model name, defaulting to anthropic's voyage model. */
 export function resolveEmbeddingModel(): string {
+  const providerName = getActiveProviderName();
   const configuredModel = process.env.LLMWIKI_EMBEDDING_MODEL?.trim();
-  if (configuredModel) return configuredModel;
-  return EMBEDDING_MODELS[getActiveProviderName()] ?? EMBEDDING_MODELS.anthropic;
+  if (configuredModel && (providerName === "openai" || providerName === "ollama")) {
+    return configuredModel;
+  }
+  return EMBEDDING_MODELS[providerName] ?? EMBEDDING_MODELS.anthropic;
 }
 
 /** Merge fresh embeddings into an existing store, dropping slugs not in liveSlugs. */
