@@ -105,7 +105,11 @@ export async function findRelevantPages(
 ): Promise<Array<{ slug: string; title: string; summary: string }>> {
   const store = await readEmbeddingStore(root);
   if (!store || store.entries.length === 0) return [];
-  if (store.model !== resolveEmbeddingModel()) return [];
+  const activeModel = resolveEmbeddingModel();
+  if (store.model !== activeModel) {
+    warnStaleEmbeddingStore(store.model, activeModel);
+    return [];
+  }
 
   const queryVec = await getProvider().embed(question);
   return findTopK(queryVec, store, EMBEDDING_TOP_K).map((entry) => ({
@@ -171,6 +175,28 @@ async function embedPages(
     });
   }
   return fresh;
+}
+
+/** Tracks which (stored, active) model pairs have already been warned about. */
+const warnedStaleModels = new Set<string>();
+
+/** Warn once per (stored, active) model pair so queries stay quiet on repeat runs. */
+function warnStaleEmbeddingStore(storedModel: string, activeModel: string): void {
+  const key = `${storedModel}→${activeModel}`;
+  if (warnedStaleModels.has(key)) return;
+  warnedStaleModels.add(key);
+  output.status(
+    "!",
+    output.warn(
+      `Embedding store was built with "${storedModel}" but active embedding model is "${activeModel}". ` +
+      `Falling back to full-index selection. Run 'llmwiki compile' to rebuild embeddings.`,
+    ),
+  );
+}
+
+/** Test-only hook: clear the warned-pair cache so each test sees a fresh warning. */
+export function resetStaleEmbeddingWarnings(): void {
+  warnedStaleModels.clear();
 }
 
 /** Choose the active embedding model name, defaulting to anthropic's voyage model. */

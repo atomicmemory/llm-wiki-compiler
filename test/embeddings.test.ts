@@ -12,6 +12,7 @@ import {
   findTopK,
   findRelevantPages,
   readEmbeddingStore,
+  resetStaleEmbeddingWarnings,
   resolveEmbeddingModel,
   updateEmbeddings,
   writeEmbeddingStore,
@@ -58,6 +59,7 @@ afterEach(() => {
   delete process.env.LLMWIKI_PROVIDER;
   delete process.env.LLMWIKI_EMBEDDING_MODEL;
   delete process.env.OPENAI_API_KEY;
+  resetStaleEmbeddingWarnings();
   vi.restoreAllMocks();
 });
 
@@ -179,6 +181,23 @@ describe("embedding model selection", () => {
     const result = await findRelevantPages(root, "alpha");
 
     expect(result).toEqual([]);
+  });
+
+  it("warns once when the stored model differs from the active model", async () => {
+    const root = await makeRoot();
+    process.env.LLMWIKI_PROVIDER = "openai";
+    process.env.LLMWIKI_EMBEDDING_MODEL = "new-model";
+    await writeEmbeddingStore(root, makeStore([makeEntry("alpha", [1, 0])]));
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await findRelevantPages(root, "alpha");
+    await findRelevantPages(root, "alpha");
+
+    const warnings = log.mock.calls.filter(([line]) =>
+      typeof line === "string" && line.includes("Falling back to full-index"),
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0][0]).toContain('"new-model"');
   });
 
   it("rebuilds live page embeddings when the stored model changes", async () => {
