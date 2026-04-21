@@ -173,10 +173,7 @@ describe("embedding model selection", () => {
   });
 
   it("ignores a mismatched store during semantic lookup", async () => {
-    const root = await makeRoot();
-    process.env.LLMWIKI_PROVIDER = "openai";
-    process.env.LLMWIKI_EMBEDDING_MODEL = "new-model";
-    await writeEmbeddingStore(root, makeStore([makeEntry("alpha", [1, 0])]));
+    const root = await setupOpenAIWithStaleStore();
 
     const result = await findRelevantPages(root, "alpha");
 
@@ -184,10 +181,7 @@ describe("embedding model selection", () => {
   });
 
   it("warns once when the stored model differs from the active model", async () => {
-    const root = await makeRoot();
-    process.env.LLMWIKI_PROVIDER = "openai";
-    process.env.LLMWIKI_EMBEDDING_MODEL = "new-model";
-    await writeEmbeddingStore(root, makeStore([makeEntry("alpha", [1, 0])]));
+    const root = await setupOpenAIWithStaleStore();
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
 
     await findRelevantPages(root, "alpha");
@@ -201,13 +195,10 @@ describe("embedding model selection", () => {
   });
 
   it("rebuilds live page embeddings when the stored model changes", async () => {
-    const root = await makeRoot();
-    process.env.LLMWIKI_PROVIDER = "openai";
-    process.env.LLMWIKI_EMBEDDING_MODEL = "new-model";
+    const root = await setupOpenAIWithStaleStore();
     process.env.OPENAI_API_KEY = "test-key";
     vi.spyOn(OpenAIProvider.prototype, "embed").mockResolvedValue([0.9, 0.1]);
     await writeConceptPage(root, "alpha");
-    await writeEmbeddingStore(root, makeStore([makeEntry("alpha", [1, 0])]));
 
     await updateEmbeddings(root, []);
     const store = await readEmbeddingStore(root);
@@ -217,3 +208,12 @@ describe("embedding model selection", () => {
     expect(store?.entries[0].vector).toEqual([0.9, 0.1]);
   });
 });
+
+/** Set up an OpenAI provider with an embedding store whose model is now stale. */
+async function setupOpenAIWithStaleStore(): Promise<string> {
+  const root = await makeRoot();
+  process.env.LLMWIKI_PROVIDER = "openai";
+  process.env.LLMWIKI_EMBEDDING_MODEL = "new-model";
+  await writeEmbeddingStore(root, makeStore([makeEntry("alpha", [1, 0])]));
+  return root;
+}
