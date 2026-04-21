@@ -269,17 +269,26 @@ Karpathy describes an abstract pattern for turning raw data into compiled knowle
 
 ## Roadmap
 
+Shipped in 0.2.0:
+
 - ✅ Better provenance (paragraph-level source attribution)
 - ✅ Linting pass for wiki quality checks
 - ✅ Multi-provider support (OpenAI, Ollama, MiniMax)
 - ✅ Larger-corpus query strategy (semantic search, embeddings)
 - ✅ Deeper Obsidian integration (tags, aliases, Map of Content)
 - ✅ MCP server for agent integration
-- Image support
-- Marp slides
-- Fine-tuning
 
-If you want to contribute, these are the highest-leverage areas right now. Issues and PRs are welcome.
+Next up:
+
+- Candidate review queue (approve compile output before pages are written)
+- Confidence and contradiction metadata on compiled pages
+- Claim-level provenance with source ranges
+- Multimodal ingest (images, PDFs, transcripts)
+- Chunked retrieval with reranking
+- Export bundle (`llms.txt`, JSON, JSON-LD, GraphML, Marp)
+- Session-history adapters (Claude, Codex, Cursor exports)
+
+If you like ambitious problems: **claim-level provenance**, **chunked retrieval with reranking**, and **confidence/contradiction metadata** are the meatiest. Open an issue to claim one or kick off a design discussion.
 
 ## Requirements
 
