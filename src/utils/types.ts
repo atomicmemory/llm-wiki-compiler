@@ -34,7 +34,7 @@ export interface SourceChange {
 }
 
 /** Wiki page frontmatter parsed from YAML. */
-interface WikiFrontmatter {
+export interface WikiFrontmatter {
   title: string;
   sources: string[];
   summary: string;
@@ -43,6 +43,11 @@ interface WikiFrontmatter {
   aliases?: string[];
   createdAt: string;
   updatedAt: string;
+  /**
+   * Optional typed page kind. Defaults to "concept" when absent so existing
+   * pages compiled before the schema layer existed continue to work.
+   */
+  kind?: "concept" | "entity" | "comparison" | "overview";
 }
 
 /** Summary entry used in index.md generation. */

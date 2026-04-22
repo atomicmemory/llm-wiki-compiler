@@ -6,7 +6,7 @@
  * This is the main entry point for programmatic lint access.
  */
 
-import type { LintResult, LintRule, LintSummary } from "./types.js";
+import type { LintResult, LintRule, LintSummary, SchemaAwareLintRule } from "./types.js";
 import {
   checkBrokenWikilinks,
   checkOrphanedPages,
@@ -14,10 +14,12 @@ import {
   checkDuplicateConcepts,
   checkEmptyPages,
   checkBrokenCitations,
+  checkSchemaCrossLinks,
 } from "./rules.js";
+import { loadSchema } from "../schema/index.js";
 
-/** All lint rules to execute during a lint pass. */
-const ALL_RULES: LintRule[] = [
+/** Rule-only lint checks that don't depend on the schema layer. */
+const RULES_WITHOUT_SCHEMA: LintRule[] = [
   checkBrokenWikilinks,
   checkOrphanedPages,
   checkMissingSummaries,
@@ -25,6 +27,9 @@ const ALL_RULES: LintRule[] = [
   checkEmptyPages,
   checkBrokenCitations,
 ];
+
+/** Lint rules that need the resolved schema to know per-kind expectations. */
+const RULES_WITH_SCHEMA: SchemaAwareLintRule[] = [checkSchemaCrossLinks];
 
 /**
  * Count occurrences of a specific severity level in the results.
@@ -38,15 +43,19 @@ function countBySeverity(
 
 /**
  * Run all lint rules concurrently against the wiki at the given root.
+ * Loads the project schema (or defaults) so schema-aware rules can enforce
+ * per-kind cross-link minimums alongside structural checks.
  * @param root - Absolute path to the project root directory.
  * @returns A summary containing all diagnostics and severity counts.
  */
 export async function lint(root: string): Promise<LintSummary> {
-  const ruleResults = await Promise.all(
-    ALL_RULES.map((rule) => rule(root)),
-  );
+  const schema = await loadSchema(root);
+  const [plainResults, schemaResults] = await Promise.all([
+    Promise.all(RULES_WITHOUT_SCHEMA.map((rule) => rule(root))),
+    Promise.all(RULES_WITH_SCHEMA.map((rule) => rule(root, schema))),
+  ]);
 
-  const results = ruleResults.flat();
+  const results = [...plainResults.flat(), ...schemaResults.flat()];
 
   return {
     errors: countBySeverity(results, "error"),

@@ -6,6 +6,7 @@
  */
 
 import type { ExtractedConcept } from "../utils/types.js";
+import type { PageKindRule, SeedPage } from "../schema/index.js";
 
 /**
  * Anthropic Tool definition for extracting knowledge concepts from a source.
@@ -115,6 +116,36 @@ export function buildPagePrompt(
     relatedSection,
     "\n\n--- SOURCE MATERIAL ---\n\n",
     sourceContent,
+  ].join("\n");
+}
+
+/**
+ * Build a system prompt for generating a seed page (overview / comparison /
+ * entity) declared in the project's schema config. Seed pages weave together
+ * material from related concept pages rather than from raw source files.
+ * @param seed - Seed page definition pulled from the schema.
+ * @param rule - Per-kind rule (used for the description and link minimum).
+ * @param relatedPagesContent - Concatenated content of related concept pages.
+ * @returns System prompt string for the page generation call.
+ */
+export function buildSeedPagePrompt(
+  seed: SeedPage,
+  rule: PageKindRule,
+  relatedPagesContent: string,
+): string {
+  const minLinks = rule.minWikilinks;
+  const linkExpectation = minLinks > 0
+    ? `Include at least ${minLinks} [[wikilinks]] to related pages.`
+    : "Use [[wikilinks]] when referencing other pages.";
+  return [
+    `You are a wiki author. Write a ${seed.kind} page titled "${seed.title}".`,
+    `Page-kind guidance: ${rule.description}`,
+    `Summary line for context: ${seed.summary}`,
+    "Draw facts only from the related wiki pages provided below.",
+    linkExpectation,
+    "Write in a neutral, informative tone. Be concise but thorough.",
+    "\n\n--- RELATED PAGES ---\n\n",
+    relatedPagesContent,
   ].join("\n");
 }
 

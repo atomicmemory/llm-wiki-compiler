@@ -13,6 +13,11 @@ import path from "path";
 import { parseFrontmatter, slugify } from "../utils/markdown.js";
 import { CONCEPTS_DIR, QUERIES_DIR, SOURCES_DIR } from "../utils/constants.js";
 import type { LintResult } from "./types.js";
+import {
+  countWikilinks,
+  resolvePageKind,
+  type SchemaConfig,
+} from "../schema/index.js";
 
 /** Minimum body length (in characters) for a page to be considered non-empty. */
 const MIN_BODY_LENGTH = 50;
@@ -211,6 +216,44 @@ export async function checkEmptyPages(root: string): Promise<LintResult[]> {
         message: `Page body is empty or too short (< ${MIN_BODY_LENGTH} chars)`,
       });
     }
+  }
+
+  return results;
+}
+
+/**
+ * Enforce per-kind cross-link minimums declared in the schema.
+ * For each page, resolve its kind, look up the rule, and warn when the page
+ * body has fewer wikilinks than the rule requires. Pages with kind `concept`
+ * and a minimum of 0 (the default) generate no diagnostics, so existing
+ * projects without a schema file see no behaviour change.
+ * @param root - Project root directory.
+ * @param schema - Resolved schema config.
+ */
+export async function checkSchemaCrossLinks(
+  root: string,
+  schema: SchemaConfig,
+): Promise<LintResult[]> {
+  const pages = await collectAllPages(root);
+  const results: LintResult[] = [];
+
+  for (const page of pages) {
+    const { meta, body } = parseFrontmatter(page.content);
+    const kind = resolvePageKind(meta.kind, schema);
+    const rule = schema.kinds[kind];
+    if (rule.minWikilinks <= 0) continue;
+
+    const linkCount = countWikilinks(body);
+    if (linkCount >= rule.minWikilinks) continue;
+
+    results.push({
+      rule: "schema-cross-link-minimum",
+      severity: "warning",
+      file: page.filePath,
+      message:
+        `Page kind "${kind}" requires at least ${rule.minWikilinks} ` +
+        `[[wikilinks]] but only ${linkCount} found.`,
+    });
   }
 
   return results;
