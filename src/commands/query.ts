@@ -18,9 +18,22 @@ import type { LLMTool } from "../utils/provider.js";
 import { atomicWrite, safeReadFile, slugify, buildFrontmatter, parseFrontmatter } from "../utils/markdown.js";
 import { generateIndex } from "../compiler/indexgen.js";
 import * as output from "../utils/output.js";
-import { QUERY_PAGE_LIMIT, INDEX_FILE, CONCEPTS_DIR, QUERIES_DIR } from "../utils/constants.js";
-import { findRelevantPages, updateEmbeddings } from "../utils/embeddings.js";
-import type { QueryResult } from "../utils/types.js";
+import {
+  QUERY_PAGE_LIMIT,
+  INDEX_FILE,
+  CONCEPTS_DIR,
+  QUERIES_DIR,
+  CHUNK_TOP_K,
+  CHUNK_RERANK_KEEP,
+} from "../utils/constants.js";
+import {
+  findRelevantPages,
+  findRelevantChunks,
+  updateEmbeddings,
+  type ChunkEmbeddingEntry,
+} from "../utils/embeddings.js";
+import { rerankWithBm25 } from "../utils/retrieval.js";
+import type { ChunkCitation, QueryResult, RetrievalDebug } from "../utils/types.js";
 
 /** Directories to search when loading selected pages, in priority order. */
 const PAGE_DIRS = [CONCEPTS_DIR, QUERIES_DIR];
@@ -99,26 +112,148 @@ interface SelectedPages {
   pages: string[];
   rawPages: string[];
   reasoning: string;
+  /** Chunk citations driving the selection — empty when chunk store is absent. */
+  chunks: ChunkCitation[];
+  /** Debug snapshot of the retrieval pipeline (only populated in debug mode). */
+  debug?: RetrievalDebug;
 }
 
 /**
- * Pick relevant pages using embedding pre-filter when available.
- * Falls back to sending the full wiki index when no embeddings store exists
- * or when the embedding call fails.
+ * Pick relevant pages using a chunk-aware embedding pre-filter when available,
+ * falling back to page-level embeddings, then to sending the full wiki index.
  */
-async function selectRelevantPages(root: string, question: string): Promise<SelectedPages> {
+async function selectRelevantPages(
+  root: string,
+  question: string,
+  debug: boolean,
+): Promise<SelectedPages> {
+  const chunkSelection = await trySelectViaChunks(root, question, debug);
+  if (chunkSelection) return chunkSelection;
+
   const candidates = await tryFindRelevantPages(root, question);
 
   if (candidates.length > 0) {
     const filteredIndex = buildFilteredIndex(candidates);
     const { pages: rawPages, reasoning } = await selectPages(question, filteredIndex);
     // Tool output holds slugs directly in the semantic path — no slugify needed.
-    return { pages: rawPages, rawPages, reasoning };
+    return { pages: rawPages, rawPages, reasoning, chunks: [] };
   }
 
   const indexContent = await safeReadFile(path.join(root, INDEX_FILE));
   const { pages: rawPages, reasoning } = await selectPages(question, indexContent);
-  return { pages: rawPages.map((p) => slugify(p)), rawPages, reasoning };
+  return { pages: rawPages.map((p) => slugify(p)), rawPages, reasoning, chunks: [] };
+}
+
+/**
+ * Attempt chunk-level retrieval + reranking. Returns null when no chunk store
+ * is available (caller falls back to page-level retrieval transparently).
+ */
+async function trySelectViaChunks(
+  root: string,
+  question: string,
+  debug: boolean,
+): Promise<SelectedPages | null> {
+  const ranked = await tryFindRelevantChunks(root, question);
+  if (ranked.length === 0) return null;
+
+  const reranked = rerankWithBm25(
+    question,
+    ranked.map(({ chunk, score }) => ({ text: chunk.text, baseScore: score, chunk })),
+  );
+  const kept = reranked.slice(0, CHUNK_RERANK_KEEP);
+  const reorderingHappened = wasReordered(ranked, kept.map((k) => k.candidate.chunk));
+  const chunkCitations = toChunkCitations(kept);
+  const pageSlugs = collapseToPages(chunkCitations, QUERY_PAGE_LIMIT);
+  const reasoning = buildChunkReasoning(chunkCitations, pageSlugs);
+
+  return {
+    pages: pageSlugs,
+    rawPages: pageSlugs,
+    reasoning,
+    chunks: chunkCitations,
+    debug: debug ? buildDebug(chunkCitations, pageSlugs, reorderingHappened) : undefined,
+  };
+}
+
+/** Detect whether reranking actually changed the chunk order. */
+function wasReordered(
+  before: Array<{ chunk: ChunkEmbeddingEntry }>,
+  after: ChunkEmbeddingEntry[],
+): boolean {
+  const limit = Math.min(before.length, after.length);
+  for (let i = 0; i < limit; i++) {
+    if (before[i].chunk !== after[i]) return true;
+  }
+  return false;
+}
+
+interface RankedChunk {
+  candidate: { chunk: ChunkEmbeddingEntry };
+  score: number;
+}
+
+/** Convert reranked candidates into citation records consumed downstream. */
+function toChunkCitations(ranked: RankedChunk[]): ChunkCitation[] {
+  return ranked.map(({ candidate, score }) => ({
+    slug: candidate.chunk.slug,
+    title: candidate.chunk.title,
+    chunkIndex: candidate.chunk.chunkIndex,
+    score,
+    text: candidate.chunk.text,
+  }));
+}
+
+/** Collapse chunk citations down to a deduplicated list of parent page slugs. */
+function collapseToPages(chunks: ChunkCitation[], limit: number): string[] {
+  const slugs: string[] = [];
+  const seen = new Set<string>();
+  for (const chunk of chunks) {
+    if (seen.has(chunk.slug)) continue;
+    seen.add(chunk.slug);
+    slugs.push(chunk.slug);
+    if (slugs.length >= limit) break;
+  }
+  return slugs;
+}
+
+/** Human-readable reasoning trail for the chunk-driven selection. */
+function buildChunkReasoning(chunks: ChunkCitation[], pages: string[]): string {
+  const top = chunks.slice(0, pages.length);
+  const summary = top.map((c) => `${c.slug}#${c.chunkIndex} (${c.score.toFixed(3)})`).join(", ");
+  return `Selected ${pages.length} page(s) from ${chunks.length} reranked chunks: ${summary}`;
+}
+
+/** Snapshot used by debug mode — pure data, no side-effects. */
+function buildDebug(
+  chunks: ChunkCitation[],
+  pageSlugs: string[],
+  reranked: boolean,
+): RetrievalDebug {
+  const bestPerPage = new Map<string, number>();
+  for (const c of chunks) {
+    const prev = bestPerPage.get(c.slug);
+    if (prev === undefined || c.score > prev) bestPerPage.set(c.slug, c.score);
+  }
+  return {
+    pages: pageSlugs.map((slug) => ({ slug, score: bestPerPage.get(slug) ?? 0 })),
+    chunks,
+    usedChunks: true,
+    reranked,
+  };
+}
+
+/** Chunk-level candidate lookup that never throws. */
+async function tryFindRelevantChunks(
+  root: string,
+  question: string,
+): Promise<Array<{ chunk: ChunkEmbeddingEntry; score: number }>> {
+  try {
+    return await findRelevantChunks(root, question, CHUNK_TOP_K);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    output.status("!", output.dim(`Chunk pre-filter unavailable (${message}); falling back.`));
+    return [];
+  }
 }
 
 /** Embedding-based candidate lookup that never throws. */
@@ -174,22 +309,34 @@ const ANSWER_SYSTEM_PROMPT =
   "If the wiki doesn't contain enough information, say so.";
 
 /**
- * Call the LLM with the loaded wiki pages as grounding context.
- * Streams to the provided onToken callback when one is supplied,
- * otherwise returns the full answer without streaming.
+ * Call the LLM with the loaded wiki pages as grounding context. When chunk
+ * citations are available, they are attached as a "Most relevant excerpts"
+ * section so the model can prioritise the precise paragraphs that drove
+ * page selection.
  */
 async function callAnswerLLM(
   question: string,
   pagesContent: string,
+  chunks: ChunkCitation[],
   onToken?: (text: string) => void,
 ): Promise<string> {
-  const userMessage = `Question: ${question}\n\nRelevant wiki pages:\n${pagesContent}`;
+  const provenance = chunks.length > 0 ? buildChunkProvenance(chunks) : "";
+  const userMessage =
+    `Question: ${question}\n\nRelevant wiki pages:\n${pagesContent}${provenance}`;
   return callClaude({
     system: ANSWER_SYSTEM_PROMPT,
     messages: [{ role: "user", content: userMessage }],
     stream: Boolean(onToken),
     onToken,
   });
+}
+
+/** Render the top chunk excerpts as a labelled section appended to the prompt. */
+function buildChunkProvenance(chunks: ChunkCitation[]): string {
+  const sections = chunks.map(
+    (chunk) => `--- ${chunk.slug} (chunk ${chunk.chunkIndex}) ---\n${chunk.text}`,
+  );
+  return `\n\nMost relevant excerpts (from chunk-level retrieval):\n${sections.join("\n\n")}`;
 }
 
 /**
@@ -255,6 +402,8 @@ interface GenerateAnswerOptions {
   onToken?: (text: string) => void;
   /** Callback fired once page selection completes — lets CLIs print reasoning before streaming. */
   onPageSelection?: (pages: string[], reasoning: string) => void;
+  /** Capture chunk-level provenance + scoring detail in the result. */
+  debug?: boolean;
 }
 
 /**
@@ -276,23 +425,35 @@ export async function generateAnswer(
     throw new Error("Wiki index not found. Run `llmwiki compile` first.");
   }
 
-  const { pages, reasoning } = await selectRelevantPages(root, question);
-  options.onPageSelection?.(pages, reasoning);
+  const selection = await selectRelevantPages(root, question, Boolean(options.debug));
+  options.onPageSelection?.(selection.pages, selection.reasoning);
 
-  const pagesContent = await loadSelectedPages(root, pages);
+  const pagesContent = await loadSelectedPages(root, selection.pages);
 
   if (!pagesContent) {
-    return { answer: "", selectedPages: pages, reasoning };
+    return buildEmptyResult(selection);
   }
 
-  const answer = await callAnswerLLM(question, pagesContent, options.onToken);
+  const answer = await callAnswerLLM(question, pagesContent, selection.chunks, options.onToken);
+  const saved = options.save ? await saveQueryPage(root, question, answer) : undefined;
 
-  let saved: string | undefined;
-  if (options.save) {
-    saved = await saveQueryPage(root, question, answer);
-  }
+  return {
+    answer,
+    selectedPages: selection.pages,
+    reasoning: selection.reasoning,
+    saved,
+    debug: selection.debug,
+  };
+}
 
-  return { answer, selectedPages: pages, reasoning, saved };
+/** Build the empty-pages result while preserving any debug/chunk context. */
+function buildEmptyResult(selection: SelectedPages): QueryResult {
+  return {
+    answer: "",
+    selectedPages: selection.pages,
+    reasoning: selection.reasoning,
+    debug: selection.debug,
+  };
 }
 
 /**
@@ -304,7 +465,7 @@ export async function generateAnswer(
 export default async function queryCommand(
   root: string,
   question: string,
-  options: { save?: boolean },
+  options: { save?: boolean; debug?: boolean },
 ): Promise<void> {
   if (!existsSync(path.join(root, INDEX_FILE))) {
     output.status("!", output.error("Wiki index not found. Run `llmwiki compile` first."));
@@ -315,6 +476,7 @@ export default async function queryCommand(
 
   const result = await generateAnswer(root, question, {
     save: options.save,
+    debug: options.debug,
     onToken: (text) => process.stdout.write(text),
     onPageSelection: (pages, reasoning) => {
       output.status("i", output.dim(`Reasoning: ${reasoning}`));
@@ -325,6 +487,8 @@ export default async function queryCommand(
 
   // Newline after streamed answer so subsequent terminal output formats cleanly.
   process.stdout.write("\n");
+
+  if (result.debug) printDebugSnapshot(result.debug);
 
   if (!result.answer) {
     output.status("!", output.error("No matching pages found. Try refining your question."));
@@ -337,3 +501,28 @@ export default async function queryCommand(
     output.status("→", output.dim("Tip: use --save to add this answer to your wiki"));
   }
 }
+
+/** Render the retrieval debug snapshot to the terminal for human inspection. */
+function printDebugSnapshot(debug: RetrievalDebug): void {
+  output.header("Retrieval debug");
+  output.status(
+    "i",
+    output.dim(
+      `Source: ${debug.usedChunks ? "chunk-level" : "page-level"}; ` +
+      `reranked: ${debug.reranked ? "yes" : "no"}`,
+    ),
+  );
+  for (const page of debug.pages) {
+    output.status("•", `${page.slug} (best chunk score ${page.score.toFixed(3)})`);
+  }
+  for (const chunk of debug.chunks) {
+    const preview = chunk.text.slice(0, DEBUG_CHUNK_PREVIEW_CHARS).replace(/\s+/g, " ").trim();
+    output.status(
+      "·",
+      output.dim(`${chunk.slug}#${chunk.chunkIndex} score=${chunk.score.toFixed(3)} :: ${preview}…`),
+    );
+  }
+}
+
+/** Maximum chunk preview length printed in --debug output. */
+const DEBUG_CHUNK_PREVIEW_CHARS = 120;

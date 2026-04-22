@@ -62,12 +62,35 @@ export interface CompileResult {
   errors: string[];
 }
 
+/** A single chunk citation surfaced as part of a query result. */
+export interface ChunkCitation {
+  slug: string;
+  title: string;
+  chunkIndex: number;
+  score: number;
+  text: string;
+}
+
+/** Diagnostic snapshot of how the retrieval pipeline picked context. */
+export interface RetrievalDebug {
+  /** Pages selected after collapsing chunks to their parent slugs. */
+  pages: Array<{ slug: string; score: number }>;
+  /** Top-ranked chunks before the page-collapse step. */
+  chunks: ChunkCitation[];
+  /** True when chunk-level entries drove the selection (vs. page-level fallback). */
+  usedChunks: boolean;
+  /** True when reranking reordered the initial semantic ranking. */
+  reranked: boolean;
+}
+
 /** Structured result returned by the query pipeline. */
 export interface QueryResult {
   answer: string;
   selectedPages: string[];
   reasoning: string;
   saved?: string;
+  /** Populated when the query was run in debug mode. */
+  debug?: RetrievalDebug;
 }
 
 /** Structured result returned by the ingest pipeline. */

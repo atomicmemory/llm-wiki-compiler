@@ -1,12 +1,19 @@
 /**
  * Embedding-based semantic search utilities.
  *
- * Maintains a persistent store of page embeddings in .llmwiki/embeddings.json
- * and provides cosine-similarity retrieval so the query command can narrow
- * hundreds of pages down to a small top-K before calling the selection LLM.
+ * Maintains a persistent store of page and chunk embeddings in
+ * .llmwiki/embeddings.json and provides cosine-similarity retrieval so the
+ * query command can narrow hundreds of pages down to a small top-K before
+ * calling the selection LLM.
  *
  * The store is additive: successful embedding calls update entries; failures
  * degrade gracefully (caller falls back to full-index selection).
+ *
+ * The store has two on-disk versions:
+ *   - v1: page-level entries only (legacy; still readable).
+ *   - v2: page-level entries plus optional chunk-level entries that enable
+ *     paragraph-precision retrieval, content-hash-aware incremental updates,
+ *     and reranking before final page selection.
  */
 
 import { readFile, readdir } from "fs/promises";
@@ -21,7 +28,11 @@ import {
   EMBEDDING_TOP_K,
   EMBEDDING_MODELS,
 } from "./constants.js";
+import { hashChunkText, splitIntoChunks } from "./retrieval.js";
 import * as output from "./output.js";
+
+/** Current store version; bumped from 1 → 2 when chunk entries were added. */
+const STORE_VERSION = 2 as const;
 
 /** A single embedded page record. */
 export interface EmbeddingEntry {
@@ -32,12 +43,25 @@ export interface EmbeddingEntry {
   updatedAt: string;
 }
 
+/** A single embedded chunk drawn from a page body. */
+export interface ChunkEmbeddingEntry {
+  slug: string;
+  title: string;
+  chunkIndex: number;
+  contentHash: string;
+  text: string;
+  vector: number[];
+  updatedAt: string;
+}
+
 /** Root shape of .llmwiki/embeddings.json. */
 export interface EmbeddingStore {
-  version: 1;
+  version: 1 | 2;
   model: string;
   dimensions: number;
   entries: EmbeddingEntry[];
+  /** Optional in v2 stores; absent in v1 stores. */
+  chunks?: ChunkEmbeddingEntry[];
 }
 
 /** A retrievable page record on disk (concepts/ or queries/). */
@@ -45,6 +69,7 @@ interface PageRecord {
   slug: string;
   title: string;
   summary: string;
+  body: string;
 }
 
 /**
@@ -81,6 +106,20 @@ export function findTopK(
   return scored.slice(0, k).map((item) => item.entry);
 }
 
+/** Score and sort chunk entries by cosine similarity, returning the top-K. */
+export function findTopKChunks(
+  queryVec: number[],
+  chunks: ChunkEmbeddingEntry[],
+  k: number,
+): Array<{ chunk: ChunkEmbeddingEntry; score: number }> {
+  const scored = chunks.map((chunk) => ({
+    chunk,
+    score: cosineSimilarity(queryVec, chunk.vector),
+  }));
+  scored.sort((left, right) => right.score - left.score);
+  return scored.slice(0, k);
+}
+
 /** Read .llmwiki/embeddings.json, returning null if it does not exist. */
 export async function readEmbeddingStore(root: string): Promise<EmbeddingStore | null> {
   const filePath = path.join(root, EMBEDDINGS_FILE);
@@ -103,13 +142,8 @@ export async function findRelevantPages(
   root: string,
   question: string,
 ): Promise<Array<{ slug: string; title: string; summary: string }>> {
-  const store = await readEmbeddingStore(root);
-  if (!store || store.entries.length === 0) return [];
-  const activeModel = resolveEmbeddingModel();
-  if (store.model !== activeModel) {
-    warnStaleEmbeddingStore(store.model, activeModel);
-    return [];
-  }
+  const store = await loadActiveStore(root, (s) => s.entries.length > 0);
+  if (!store) return [];
 
   const queryVec = await getProvider().embed(question);
   return findTopK(queryVec, store, EMBEDDING_TOP_K).map((entry) => ({
@@ -117,6 +151,40 @@ export async function findRelevantPages(
     title: entry.title,
     summary: entry.summary,
   }));
+}
+
+/**
+ * Look up top-K chunks similar to the question. Returns [] when no chunk-level
+ * store exists so callers can fall back to page-level retrieval.
+ */
+export async function findRelevantChunks(
+  root: string,
+  question: string,
+  k: number,
+): Promise<Array<{ chunk: ChunkEmbeddingEntry; score: number }>> {
+  const store = await loadActiveStore(root, (s) => Boolean(s.chunks && s.chunks.length > 0));
+  if (!store) return [];
+  const queryVec = await getProvider().embed(question);
+  return findTopKChunks(queryVec, store.chunks ?? [], k);
+}
+
+/**
+ * Read the embedding store, returning null when it is missing, empty (per the
+ * caller's predicate), or built with a stale model. Centralises the "is this
+ * store usable for semantic lookup right now?" check.
+ */
+async function loadActiveStore(
+  root: string,
+  hasContent: (store: EmbeddingStore) => boolean,
+): Promise<EmbeddingStore | null> {
+  const store = await readEmbeddingStore(root);
+  if (!store || !hasContent(store)) return null;
+  const activeModel = resolveEmbeddingModel();
+  if (store.model !== activeModel) {
+    warnStaleEmbeddingStore(store.model, activeModel);
+    return null;
+  }
+  return store;
 }
 
 /** Scan concepts/ and queries/ directories, returning retrievable pages. */
@@ -131,17 +199,24 @@ async function collectPageRecords(root: string): Promise<PageRecord[]> {
       continue;
     }
     for (const file of files.filter((f) => f.endsWith(".md"))) {
-      const content = await safeReadFile(path.join(absDir, file));
-      const { meta } = parseFrontmatter(content);
-      if (meta.orphaned || typeof meta.title !== "string") continue;
-      records.push({
-        slug: file.replace(/\.md$/, ""),
-        title: meta.title,
-        summary: typeof meta.summary === "string" ? meta.summary : "",
-      });
+      const record = await readPageRecord(absDir, file);
+      if (record) records.push(record);
     }
   }
   return records;
+}
+
+/** Parse a single page file into a PageRecord, skipping orphans/untitled pages. */
+async function readPageRecord(absDir: string, file: string): Promise<PageRecord | null> {
+  const content = await safeReadFile(path.join(absDir, file));
+  const { meta, body } = parseFrontmatter(content);
+  if (meta.orphaned || typeof meta.title !== "string") return null;
+  return {
+    slug: file.replace(/\.md$/, ""),
+    title: meta.title,
+    summary: typeof meta.summary === "string" ? meta.summary : "",
+    body,
+  };
 }
 
 /** Build the text that represents a page in the embedding space. */
@@ -226,6 +301,84 @@ function mergeEntries(
 }
 
 /**
+ * Refresh chunk embeddings for the given pages, reusing existing chunk vectors
+ * whose contentHash still matches. Pages absent from `records` are pruned.
+ */
+async function refreshChunkEmbeddings(
+  records: PageRecord[],
+  existing: ChunkEmbeddingEntry[],
+  forceAll: boolean,
+): Promise<ChunkEmbeddingEntry[]> {
+  const liveSlugs = new Set(records.map((r) => r.slug));
+  const existingByKey = indexChunksByKey(existing.filter((c) => liveSlugs.has(c.slug)));
+  const now = new Date().toISOString();
+  const fresh: ChunkEmbeddingEntry[] = [];
+
+  for (const record of records) {
+    const pageChunks = await embedRecordChunks(record, existingByKey, forceAll, now);
+    fresh.push(...pageChunks);
+  }
+  return fresh;
+}
+
+/**
+ * Embed (or reuse) every chunk for a single page, in order. Reused chunks have
+ * their `title` refreshed so a renamed page propagates to the chunk metadata.
+ */
+async function embedRecordChunks(
+  record: PageRecord,
+  existingByKey: Map<string, ChunkEmbeddingEntry>,
+  forceAll: boolean,
+  now: string,
+): Promise<ChunkEmbeddingEntry[]> {
+  const provider = getProvider();
+  const chunkTexts = splitIntoChunks(record.body);
+  const out: ChunkEmbeddingEntry[] = [];
+
+  for (let i = 0; i < chunkTexts.length; i++) {
+    const text = chunkTexts[i];
+    const contentHash = hashChunkText(text);
+    const reused = pickReusableChunk(existingByKey, record.slug, i, contentHash, forceAll);
+    if (reused) {
+      out.push({ ...reused, title: record.title });
+      continue;
+    }
+    const vector = await provider.embed(text);
+    out.push({
+      slug: record.slug, title: record.title, chunkIndex: i,
+      contentHash, text, vector, updatedAt: now,
+    });
+  }
+  return out;
+}
+
+/** Index existing chunks by `${slug}#${chunkIndex}` for O(1) reuse lookup. */
+function indexChunksByKey(chunks: ChunkEmbeddingEntry[]): Map<string, ChunkEmbeddingEntry> {
+  const byKey = new Map<string, ChunkEmbeddingEntry>();
+  for (const chunk of chunks) byKey.set(chunkKey(chunk.slug, chunk.chunkIndex), chunk);
+  return byKey;
+}
+
+/** Compose the index key for a chunk lookup. */
+function chunkKey(slug: string, chunkIndex: number): string {
+  return `${slug}#${chunkIndex}`;
+}
+
+/** Return the existing chunk vector when its hash still matches and reuse is allowed. */
+function pickReusableChunk(
+  byKey: Map<string, ChunkEmbeddingEntry>,
+  slug: string,
+  chunkIndex: number,
+  contentHash: string,
+  forceAll: boolean,
+): ChunkEmbeddingEntry | null {
+  if (forceAll) return null;
+  const existing = byKey.get(chunkKey(slug, chunkIndex));
+  if (!existing) return null;
+  return existing.contentHash === contentHash ? existing : null;
+}
+
+/**
  * Re-embed the given changed slugs and prune any entries whose pages no longer
  * exist on disk. Changed slugs not present as live pages are silently skipped.
  */
@@ -237,26 +390,59 @@ export async function updateEmbeddings(root: string, changedSlugs: string[]): Pr
   const modelChanged = Boolean(existingStore && existingStore.model !== embeddingModel);
   const toEmbed = new Set(changedSlugs.filter((slug) => liveSlugs.has(slug)));
   const previousEntries = modelChanged ? [] : existingStore?.entries ?? [];
+  const previousChunks = modelChanged ? [] : existingStore?.chunks ?? [];
 
   // Cold start: embed every page so the store is immediately useful.
   if (!existingStore || modelChanged) {
     for (const record of records) toEmbed.add(record.slug);
   }
 
-  if (!modelChanged && toEmbed.size === 0 && previousEntries.every((e) => liveSlugs.has(e.slug))) {
+  if (!shouldRunEmbedding(modelChanged, toEmbed, previousEntries, previousChunks, liveSlugs)) {
     return;
   }
 
   const freshEntries = await embedPages(records, toEmbed);
   const mergedEntries = mergeEntries(previousEntries, freshEntries, liveSlugs);
+  const mergedChunks = await refreshChunkEmbeddings(records, previousChunks, modelChanged);
 
-  const dimensions = mergedEntries[0]?.vector.length ?? 0;
+  await persistRefreshedStore(root, embeddingModel, mergedEntries, mergedChunks);
+}
+
+/** Persist a freshly merged store and emit a friendly status line. */
+async function persistRefreshedStore(
+  root: string,
+  embeddingModel: string,
+  entries: EmbeddingEntry[],
+  chunks: ChunkEmbeddingEntry[],
+): Promise<void> {
+  const dimensions = entries[0]?.vector.length ?? chunks[0]?.vector.length ?? 0;
   const store: EmbeddingStore = {
-    version: 1,
+    version: STORE_VERSION,
     model: embeddingModel,
     dimensions,
-    entries: mergedEntries,
+    entries,
+    chunks,
   };
   await writeEmbeddingStore(root, store);
-  output.status("*", output.dim(`Embeddings updated (${mergedEntries.length} pages).`));
+  output.status(
+    "*",
+    output.dim(`Embeddings updated (${entries.length} pages, ${chunks.length} chunks).`),
+  );
+}
+
+/** Decide whether updateEmbeddings has work to do beyond a no-op. */
+function shouldRunEmbedding(
+  modelChanged: boolean,
+  toEmbed: Set<string>,
+  previousEntries: EmbeddingEntry[],
+  previousChunks: ChunkEmbeddingEntry[],
+  liveSlugs: Set<string>,
+): boolean {
+  if (modelChanged) return true;
+  if (toEmbed.size > 0) return true;
+  if (!previousEntries.every((e) => liveSlugs.has(e.slug))) return true;
+  if (!previousChunks.every((c) => liveSlugs.has(c.slug))) return true;
+  // Cold-start case where we have entries but no chunks yet.
+  if (previousEntries.length > 0 && previousChunks.length === 0 && liveSlugs.size > 0) return true;
+  return false;
 }

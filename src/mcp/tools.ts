@@ -19,11 +19,12 @@ import { collectPageSummaries, scanWikiPages } from "../compiler/indexgen.js";
 import { detectChanges } from "../compiler/hasher.js";
 import { readState } from "../utils/state.js";
 import { safeReadFile, parseFrontmatter } from "../utils/markdown.js";
-import { findRelevantPages } from "../utils/embeddings.js";
+import { findRelevantChunks, findRelevantPages } from "../utils/embeddings.js";
 import {
   CONCEPTS_DIR,
   INDEX_FILE,
   QUERIES_DIR,
+  CHUNK_TOP_K,
 } from "../utils/constants.js";
 import { ensureProviderAvailable } from "./provider-check.js";
 
@@ -118,18 +119,23 @@ function registerQueryTool(server: McpServer, root: string): void {
       description:
         "Ask a natural-language question. Selects relevant pages with the LLM, " +
         "loads them, and returns a grounded answer with citations. Set save=true " +
-        "to persist the answer as a wiki page. Requires an LLM provider.",
+        "to persist the answer as a wiki page. Set debug=true to include the " +
+        "selected chunks and their scores. Requires an LLM provider.",
       inputSchema: {
         question: z.string().describe("The natural-language question to answer."),
         save: z
           .boolean()
           .optional()
           .describe("Persist the answer as a wiki/queries/ page when true."),
+        debug: z
+          .boolean()
+          .optional()
+          .describe("Include retrieval debug info (selected chunks/pages + scores)."),
       },
     },
-    async ({ question, save }) => {
+    async ({ question, save, debug }) => {
       ensureProviderAvailable();
-      const result = await generateAnswer(root, question, { save });
+      const result = await generateAnswer(root, question, { save, debug });
       return jsonResult(result);
     },
   );
@@ -157,8 +163,19 @@ function registerSearchTool(server: McpServer, root: string): void {
   );
 }
 
-/** Resolve search candidates: prefer semantic search, fall back to LLM selection. */
+/**
+ * Resolve search candidates. Tries chunk-level retrieval first (highest
+ * precision), then falls back to page-level embeddings, then to LLM-driven
+ * selection over the wiki index.
+ */
 async function pickSearchSlugs(root: string, question: string): Promise<string[]> {
+  try {
+    const chunks = await findRelevantChunks(root, question, CHUNK_TOP_K);
+    if (chunks.length > 0) return dedupePreservingOrder(chunks.map((c) => c.chunk.slug));
+  } catch {
+    // Chunk store unavailable — fall through to page-level embeddings.
+  }
+
   try {
     const candidates = await findRelevantPages(root, question);
     if (candidates.length > 0) return candidates.map((c) => c.slug);
@@ -169,6 +186,18 @@ async function pickSearchSlugs(root: string, question: string): Promise<string[]
   const indexContent = await safeReadFile(path.join(root, INDEX_FILE));
   const { pages } = await selectPages(question, indexContent);
   return pages;
+}
+
+/** Deduplicate slugs while preserving the first-seen ordering. */
+function dedupePreservingOrder(slugs: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const slug of slugs) {
+    if (seen.has(slug)) continue;
+    seen.add(slug);
+    out.push(slug);
+  }
+  return out;
 }
 
 function registerReadTool(server: McpServer, root: string): void {
