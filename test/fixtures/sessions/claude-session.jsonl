@@ -1,0 +1,4 @@
+{"type":"user","message":{"role":"user","content":"How do I implement a binary search tree in TypeScript?"},"timestamp":"2024-01-15T10:00:00.000Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"A binary search tree (BST) in TypeScript can be implemented using a generic node class.\n\nHere's a simple approach:\n\n```typescript\nclass BSTNode<T> {\n  value: T;\n  left: BSTNode<T> | null = null;\n  right: BSTNode<T> | null = null;\n  constructor(value: T) { this.value = value; }\n}\n```"}]},"timestamp":"2024-01-15T10:00:05.000Z"}
+{"type":"user","message":{"role":"user","content":"Can you add an insert method?"},"timestamp":"2024-01-15T10:01:00.000Z"}
+{"type":"assistant","message":{"role":"assistant","content":"Sure! Here is an insert method that maintains the BST property."},"timestamp":"2024-01-15T10:01:10.000Z"}
