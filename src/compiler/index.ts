@@ -37,6 +37,7 @@ import {
   type ExtractionResult,
 } from "./deps.js";
 import { markOrphaned, orphanUnownedFrozenPages } from "./orphan.js";
+import { addProvenanceMeta, reportContradictionWarnings } from "./provenance.js";
 import { resolveLinks } from "./resolver.js";
 import { generateIndex } from "./indexgen.js";
 import { addObsidianMeta, generateMOC } from "./obsidian.js";
@@ -403,6 +404,8 @@ async function generateMergedPage(
     updatedAt: now,
   };
   addObsidianMeta(frontmatterFields, entry.concept.concept, entry.concept.tags ?? []);
+  addProvenanceMeta(frontmatterFields, entry.concept);
+  reportContradictionWarnings(entry.concept.concept, entry.concept);
   const frontmatter = buildFrontmatter(frontmatterFields);
   const fullPage = `${frontmatter}\n\n${pageBody}\n`;
   return await writePageIfValid(pagePath, fullPage, entry.concept.concept);

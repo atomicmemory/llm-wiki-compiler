@@ -48,6 +48,10 @@ export const EMBEDDINGS_FILE = ".llmwiki/embeddings.json";
 /** Number of most similar pages to return from embedding-based pre-filter. */
 export const EMBEDDING_TOP_K = 15;
 
+/** Provenance metadata thresholds used by lint rules. */
+export const LOW_CONFIDENCE_THRESHOLD = 0.5;
+export const MAX_INFERRED_PARAGRAPHS_WITHOUT_CITATIONS = 2;
+
 /** Embedding model to use per provider. */
 export const EMBEDDING_MODELS: Record<string, string> = {
   anthropic: "voyage-3-lite",

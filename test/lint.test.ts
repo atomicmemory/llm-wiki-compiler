@@ -5,9 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, mkdir, writeFile, rm } from "fs/promises";
-import path from "path";
-import os from "os";
+import { rm } from "fs/promises";
 import {
   checkBrokenWikilinks,
   checkOrphanedPages,
@@ -17,34 +15,24 @@ import {
   checkBrokenCitations,
 } from "../src/linter/rules.js";
 import { lint } from "../src/linter/index.js";
+import { makeLintTempRoot } from "./fixtures/lint-temp-root.js";
 
 let tmpDir: string;
+let writeConcept: (slug: string, content: string) => Promise<void>;
+let writeQuery: (slug: string, content: string) => Promise<void>;
+let writeSource: (name: string, content: string) => Promise<void>;
 
 beforeEach(async () => {
-  tmpDir = await mkdtemp(path.join(os.tmpdir(), "lint-test-"));
-  await mkdir(path.join(tmpDir, "wiki", "concepts"), { recursive: true });
-  await mkdir(path.join(tmpDir, "wiki", "queries"), { recursive: true });
-  await mkdir(path.join(tmpDir, "sources"), { recursive: true });
+  const fx = await makeLintTempRoot("lint-test");
+  tmpDir = fx.root;
+  writeConcept = fx.writeConceptPage;
+  writeQuery = fx.writeQueryPage;
+  writeSource = fx.writeSourceFile;
 });
 
 afterEach(async () => {
   await rm(tmpDir, { recursive: true, force: true });
 });
-
-/** Helper to write a wiki page to the concepts directory. */
-async function writeConcept(slug: string, content: string): Promise<void> {
-  await writeFile(path.join(tmpDir, "wiki", "concepts", `${slug}.md`), content);
-}
-
-/** Helper to write a wiki page to the queries directory. */
-async function writeQuery(slug: string, content: string): Promise<void> {
-  await writeFile(path.join(tmpDir, "wiki", "queries", `${slug}.md`), content);
-}
-
-/** Helper to write a source file. */
-async function writeSource(name: string, content: string): Promise<void> {
-  await writeFile(path.join(tmpDir, "sources", name), content);
-}
 
 describe("checkBrokenWikilinks", () => {
   it("returns no results when all wikilinks are valid", async () => {
