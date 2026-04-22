@@ -14,6 +14,7 @@ import compileCommand from "./commands/compile.js";
 import queryCommand from "./commands/query.js";
 import watchCommand from "./commands/watch.js";
 import lintCommand from "./commands/lint.js";
+import exportCommand from "./commands/export.js";
 import { startMCPServer } from "./mcp/server.js";
 import { DEFAULT_PROVIDER } from "./utils/constants.js";
 import { resolveAnthropicAuthFromEnv } from "./utils/claude-settings.js";
@@ -86,6 +87,19 @@ program
   .action(async () => {
     try {
       await lintCommand();
+    } catch (err) {
+      console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command("export")
+  .description("Export wiki content to portable formats (llms.txt, JSON, GraphML, Marp, …)")
+  .option("--target <name>", "Limit export to a single target format")
+  .action(async (options: { target?: string }) => {
+    try {
+      await exportCommand(process.cwd(), options);
     } catch (err) {
       console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
       process.exit(1);
