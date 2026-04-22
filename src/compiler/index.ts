@@ -8,7 +8,7 @@
  * sources are processed through the LLM pipeline.
  */
 
-import { readFile, readdir } from "fs/promises";
+import { readFile } from "fs/promises";
 import path from "path";
 import { readState, updateSourceState } from "../utils/state.js";
 import {
@@ -16,15 +16,12 @@ import {
   safeReadFile,
   validateWikiPage,
   slugify,
-  buildFrontmatter,
-  parseFrontmatter,
 } from "../utils/markdown.js";
 import { callClaude } from "../utils/llm.js";
 import { acquireLock, releaseLock } from "../utils/lock.js";
 import {
   CONCEPT_EXTRACTION_TOOL,
   buildExtractionPrompt,
-  buildPagePrompt,
   parseConcepts,
 } from "./prompts.js";
 import { detectChanges, hashFile } from "./hasher.js";
@@ -39,8 +36,10 @@ import {
 import { markOrphaned, orphanUnownedFrozenPages } from "./orphan.js";
 import { resolveLinks } from "./resolver.js";
 import { generateIndex } from "./indexgen.js";
-import { addObsidianMeta, generateMOC } from "./obsidian.js";
+import { generateMOC } from "./obsidian.js";
 import { updateEmbeddings } from "../utils/embeddings.js";
+import { writeCandidate } from "./candidates.js";
+import { renderMergedPageContent } from "./page-renderer.js";
 import * as output from "../utils/output.js";
 import {
   COMPILE_CONCURRENCY,
@@ -50,8 +49,10 @@ import {
 } from "../utils/constants.js";
 import pLimit from "p-limit";
 import type {
+  CompileOptions,
   CompileResult,
   ExtractedConcept,
+  ReviewCandidate,
   SourceChange,
   SourceState,
   WikiState,
@@ -67,9 +68,10 @@ function emptyCompileResult(): CompileResult {
  * Acquires .llmwiki/lock, detects changes, compiles new/changed sources,
  * marks orphaned pages, resolves interlinks, and rebuilds the index.
  * @param root - Project root directory.
+ * @param options - Optional pipeline overrides (e.g. --review mode).
  */
-export async function compile(root: string): Promise<void> {
-  await compileAndReport(root);
+export async function compile(root: string, options: CompileOptions = {}): Promise<void> {
+  await compileAndReport(root, options);
 }
 
 /**
@@ -78,9 +80,13 @@ export async function compile(root: string): Promise<void> {
  * non-CLI consumers (the MCP server, programmatic callers) can report
  * meaningful data without scraping terminal output.
  * @param root - Project root directory.
+ * @param options - Optional pipeline overrides (e.g. --review mode).
  * @returns Structured result describing what was compiled.
  */
-export async function compileAndReport(root: string): Promise<CompileResult> {
+export async function compileAndReport(
+  root: string,
+  options: CompileOptions = {},
+): Promise<CompileResult> {
   output.header("llmwiki compile");
 
   const locked = await acquireLock(root);
@@ -93,7 +99,7 @@ export async function compileAndReport(root: string): Promise<CompileResult> {
   }
 
   try {
-    return await runCompilePipeline(root);
+    return await runCompilePipeline(root, options);
   } finally {
     await releaseLock(root);
   }
@@ -119,6 +125,8 @@ function bucketChanges(changes: SourceChange[]): ChangeBuckets {
 interface PageGenerationResult {
   pages: MergedConcept[];
   errors: string[];
+  /** Candidate ids written when running in --review mode. Empty otherwise. */
+  candidates: string[];
 }
 
 /** Phase 2: generate pages for merged concepts in parallel, capturing errors. */
@@ -126,18 +134,21 @@ async function generatePagesPhase(
   root: string,
   extractions: ExtractionResult[],
   frozenSlugs: Set<string>,
+  options: CompileOptions,
 ): Promise<PageGenerationResult> {
   const merged = mergeExtractions(extractions, frozenSlugs);
   const limit = pLimit(COMPILE_CONCURRENCY);
   const errors: string[] = [];
+  const candidates: string[] = [];
   const pages = await Promise.all(
     merged.map((entry) => limit(async () => {
-      const writeError = await generateMergedPage(root, entry);
-      if (writeError) errors.push(writeError);
+      const result = await generateMergedPage(root, entry, options);
+      if (result.error) errors.push(result.error);
+      if (result.candidateId) candidates.push(result.candidateId);
       return entry;
     })),
   );
-  return { pages, errors };
+  return { pages, errors, candidates };
 }
 
 /** Persist source state for every extraction that produced concepts. */
@@ -156,12 +167,17 @@ function summarizeCompile(
   buckets: ChangeBuckets,
   generation: PageGenerationResult,
   extractions: ExtractionResult[],
+  options: CompileOptions,
 ): CompileResult {
   output.header("Compilation complete");
   output.status("✓", output.success(
     `${buckets.toCompile.length} compiled, ${buckets.unchanged.length} skipped, ${buckets.deleted.length} deleted`,
   ));
-  if (buckets.toCompile.length > 0) {
+  if (options.review && generation.candidates.length > 0) {
+    output.status("?", output.info(
+      `${generation.candidates.length} candidate(s) awaiting review — run \`llmwiki review list\``,
+    ));
+  } else if (buckets.toCompile.length > 0) {
     output.status("→", output.dim('Next: llmwiki query "your question here"'));
   }
 
@@ -172,7 +188,7 @@ function summarizeCompile(
     }
   }
 
-  return {
+  const baseResult: CompileResult = {
     compiled: buckets.toCompile.length,
     skipped: buckets.unchanged.length,
     deleted: buckets.deleted.length,
@@ -180,10 +196,17 @@ function summarizeCompile(
     pages: generation.pages.map((entry) => entry.slug),
     errors,
   };
+  if (options.review) {
+    baseResult.candidates = generation.candidates;
+  }
+  return baseResult;
 }
 
 /** Inner pipeline, runs under lock protection. Returns structured CompileResult. */
-async function runCompilePipeline(root: string): Promise<CompileResult> {
+async function runCompilePipeline(
+  root: string,
+  options: CompileOptions,
+): Promise<CompileResult> {
   const state = await readState(root);
   const changes = await detectChanges(root, state);
   augmentWithAffectedSources(changes, findAffectedSources(state, changes));
@@ -195,24 +218,29 @@ async function runCompilePipeline(root: string): Promise<CompileResult> {
   }
 
   printChangesSummary(changes);
-  await markDeletedAsOrphaned(root, buckets.deleted, state);
+  if (!options.review) {
+    await markDeletedAsOrphaned(root, buckets.deleted, state);
+  }
 
   const frozenSlugs = findFrozenSlugs(state, changes);
   reportFrozenSlugs(frozenSlugs);
 
   const extractions = await runExtractionPhases(root, buckets.toCompile, state, changes);
-  await freezeFailedExtractions(root, extractions, frozenSlugs);
-
-  const generation = await generatePagesPhase(root, extractions, frozenSlugs);
-  await persistExtractionStates(root, extractions);
-
-  if (frozenSlugs.size > 0) {
-    await orphanUnownedFrozenPages(root, frozenSlugs);
+  if (!options.review) {
+    await freezeFailedExtractions(root, extractions, frozenSlugs);
   }
-  await persistFrozenSlugs(root, frozenSlugs, extractions);
 
-  await finalizeWiki(root, generation.pages);
-  return summarizeCompile(buckets, generation, extractions);
+  const generation = await generatePagesPhase(root, extractions, frozenSlugs, options);
+
+  if (!options.review) {
+    await persistExtractionStates(root, extractions);
+    if (frozenSlugs.size > 0) {
+      await orphanUnownedFrozenPages(root, frozenSlugs);
+    }
+    await persistFrozenSlugs(root, frozenSlugs, extractions);
+    await finalizeWiki(root, generation.pages);
+  }
+  return summarizeCompile(buckets, generation, extractions, options);
 }
 
 /** Append affected-source changes (logging each addition) to the change list. */
@@ -363,49 +391,50 @@ function mergeExtractions(
   return Array.from(bySlug.values());
 }
 
+/** Outcome of generating a single merged concept page. */
+interface MergedPageOutcome {
+  error?: string;
+  candidateId?: string;
+}
+
 /**
  * Generate a wiki page from merged source content.
  * For shared concepts, the LLM sees content from all contributing sources
- * and frontmatter records every source file.
+ * and frontmatter records every source file. When `options.review` is set,
+ * the rendered page is persisted as a review candidate instead of being
+ * written into `wiki/`.
  */
 async function generateMergedPage(
   root: string,
   entry: MergedConcept,
-): Promise<string | null> {
+  options: CompileOptions,
+): Promise<MergedPageOutcome> {
+  const fullPage = await renderMergedPageContent(root, entry);
+
+  if (options.review) {
+    return await persistReviewCandidate(root, entry, fullPage);
+  }
+
   const pagePath = path.join(root, CONCEPTS_DIR, `${entry.slug}.md`);
-  const existingPage = await safeReadFile(pagePath);
-  const relatedPages = await loadRelatedPages(root, entry.slug);
+  const error = await writePageIfValid(pagePath, fullPage, entry.concept.concept);
+  return { error: error ?? undefined };
+}
 
-  const system = buildPagePrompt(
-    entry.concept.concept,
-    entry.combinedContent,
-    existingPage,
-    relatedPages,
-  );
-
-  const pageBody = await callClaude({
-    system,
-    messages: [
-      { role: "user", content: `Write the wiki page for "${entry.concept.concept}".` },
-    ],
-  });
-
-  const now = new Date().toISOString();
-  const existing = existingPage ? parseFrontmatter(existingPage) : null;
-  const createdAt = (existing?.meta.createdAt && typeof existing.meta.createdAt === "string")
-    ? existing.meta.createdAt
-    : now;
-  const frontmatterFields: Record<string, unknown> = {
+/** Persist a candidate JSON record for later review and report it on stdout. */
+async function persistReviewCandidate(
+  root: string,
+  entry: MergedConcept,
+  fullPage: string,
+): Promise<MergedPageOutcome> {
+  const candidate: ReviewCandidate = await writeCandidate(root, {
     title: entry.concept.concept,
+    slug: entry.slug,
     summary: entry.concept.summary,
     sources: entry.sourceFiles,
-    createdAt,
-    updatedAt: now,
-  };
-  addObsidianMeta(frontmatterFields, entry.concept.concept, entry.concept.tags ?? []);
-  const frontmatter = buildFrontmatter(frontmatterFields);
-  const fullPage = `${frontmatter}\n\n${pageBody}\n`;
-  return await writePageIfValid(pagePath, fullPage, entry.concept.concept);
+    body: fullPage,
+  });
+  output.status("?", output.info(`Candidate ready: ${candidate.id} (${entry.slug})`));
+  return { candidateId: candidate.id };
 }
 
 /**
@@ -428,42 +457,6 @@ async function extractConcepts(
   return parseConcepts(rawOutput);
 }
 
-
-/**
- * Load related wiki pages to provide cross-referencing context.
- * Returns concatenated content of up to 5 existing concept pages.
- * @param root - Project root directory.
- * @param excludeSlug - Slug of the current page to exclude.
- * @returns Concatenated related page contents.
- */
-async function loadRelatedPages(
-  root: string,
-  excludeSlug: string,
-): Promise<string> {
-  const conceptsPath = path.join(root, CONCEPTS_DIR);
-  let files: string[];
-
-  try {
-    files = await readdir(conceptsPath);
-  } catch {
-    return "";
-  }
-
-  const related = files
-    .filter((f) => f.endsWith(".md") && f !== `${excludeSlug}.md`)
-    .slice(0, 5);
-
-  const contents: string[] = [];
-  for (const f of related) {
-    const content = await safeReadFile(path.join(conceptsPath, f));
-    if (!content) continue;
-    const { meta } = parseFrontmatter(content);
-    if (meta.orphaned) continue;
-    contents.push(content);
-  }
-
-  return contents.join("\n\n---\n\n");
-}
 
 /**
  * Validate and atomically write a wiki page, logging the result.
