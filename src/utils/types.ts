@@ -77,3 +77,27 @@ export interface IngestResult {
   truncated: boolean;
   source: string;
 }
+
+/**
+ * A single source span pointing back into ingested source text.
+ * Spans are inclusive on both ends and 1-indexed when referring to lines,
+ * mirroring the way humans cite editor line numbers.
+ */
+export interface SourceSpan {
+  /** Source filename (e.g. `paper.md`) — always relative to `sources/`. */
+  file: string;
+  /** Optional inclusive line range; `start` and `end` may be equal. */
+  lines?: { start: number; end: number };
+}
+
+/**
+ * A claim-level citation parsed from a `^[file.md:42-58]` or
+ * `^[file.md#L42-L58]` marker. The plain `^[file.md]` form parses with
+ * `spans[i].lines` undefined, preserving paragraph-level provenance.
+ */
+export interface ClaimCitation {
+  /** Raw text inside the brackets, useful for diagnostics. */
+  raw: string;
+  /** One or more source spans contributed by this marker. */
+  spans: SourceSpan[];
+}

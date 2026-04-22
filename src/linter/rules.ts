@@ -10,7 +10,11 @@
 import { readdir, readFile } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
-import { parseFrontmatter, slugify } from "../utils/markdown.js";
+import {
+  isMalformedCitationEntry,
+  parseFrontmatter,
+  slugify,
+} from "../utils/markdown.js";
 import { CONCEPTS_DIR, QUERIES_DIR, SOURCES_DIR } from "../utils/constants.js";
 import type { LintResult } from "./types.js";
 
@@ -216,7 +220,21 @@ export async function checkEmptyPages(root: string): Promise<LintResult[]> {
   return results;
 }
 
-/** Find ^[filename.md] citations referencing source files that don't exist. */
+/** Strip an optional `:start-end` or `#Lstart-Lend` span suffix from a citation entry. */
+function stripSpanSuffix(entry: string): string {
+  const colonIdx = entry.indexOf(":");
+  const hashIdx = entry.indexOf("#");
+  const cuts = [colonIdx, hashIdx].filter((i) => i >= 0);
+  if (cuts.length === 0) return entry;
+  return entry.slice(0, Math.min(...cuts));
+}
+
+/**
+ * Find ^[filename.md] citations referencing source files that don't exist.
+ * Accepts both paragraph form and the claim-level extension; for the latter,
+ * only the filename portion is checked against the sources directory because
+ * line ranges have no on-disk representation to validate.
+ */
 export async function checkBrokenCitations(root: string): Promise<LintResult[]> {
   const pages = await collectAllPages(root);
   const sourcesDir = path.join(root, SOURCES_DIR);
@@ -224,13 +242,55 @@ export async function checkBrokenCitations(root: string): Promise<LintResult[]> 
 
   for (const page of pages) {
     for (const { captured, line } of findMatchesInContent(page.content, CITATION_PATTERN)) {
-      const citedPath = path.join(sourcesDir, captured);
-      if (!existsSync(citedPath)) {
+      collectBrokenForMarker(captured, line, page.filePath, sourcesDir, results);
+    }
+  }
+
+  return results;
+}
+
+/** Append broken-citation diagnostics for every entry inside a single ^[...] marker. */
+function collectBrokenForMarker(
+  captured: string,
+  line: number,
+  pageFile: string,
+  sourcesDir: string,
+  out: LintResult[],
+): void {
+  for (const part of captured.split(",")) {
+    const trimmed = part.trim();
+    if (trimmed.length === 0) continue;
+    const filename = stripSpanSuffix(trimmed);
+    const citedPath = path.join(sourcesDir, filename);
+    if (existsSync(citedPath)) continue;
+    out.push({
+      rule: "broken-citation",
+      severity: "error",
+      file: pageFile,
+      message: `Broken citation ^[${captured}] — source file not found`,
+      line,
+    });
+  }
+}
+
+/**
+ * Find ^[...] markers whose entries do not parse against the documented
+ * paragraph or claim-level grammar (e.g. `^[file.md:abc]` or `^[file.md#X]`).
+ * Detects malformed claim-level citations without breaking the paragraph form.
+ */
+export async function checkMalformedClaimCitations(root: string): Promise<LintResult[]> {
+  const pages = await collectAllPages(root);
+  const results: LintResult[] = [];
+
+  for (const page of pages) {
+    for (const { captured, line } of findMatchesInContent(page.content, CITATION_PATTERN)) {
+      for (const part of captured.split(",")) {
+        if (!isMalformedCitationEntry(part)) continue;
         results.push({
-          rule: "broken-citation",
+          rule: "malformed-claim-citation",
           severity: "error",
           file: page.filePath,
-          message: `Broken citation ^[${captured}] — source file not found`,
+          message: `Malformed claim citation ^[${captured}] — expected file.md, file.md:N-N, or file.md#LN-LN`,
           line,
         });
       }

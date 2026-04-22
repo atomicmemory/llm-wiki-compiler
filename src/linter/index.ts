@@ -14,6 +14,7 @@ import {
   checkDuplicateConcepts,
   checkEmptyPages,
   checkBrokenCitations,
+  checkMalformedClaimCitations,
 } from "./rules.js";
 
 /** All lint rules to execute during a lint pass. */
@@ -24,6 +25,7 @@ const ALL_RULES: LintRule[] = [
   checkDuplicateConcepts,
   checkEmptyPages,
   checkBrokenCitations,
+  checkMalformedClaimCitations,
 ];
 
 /**
