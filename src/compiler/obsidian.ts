@@ -118,6 +118,7 @@ export async function generateMOC(root: string): Promise<void> {
 
 /** Minimal page info needed for MOC generation. */
 interface PageInfo {
+  slug: string;
   title: string;
   tags: string[];
 }
@@ -145,9 +146,10 @@ async function loadConceptPages(conceptsPath: string): Promise<PageInfo[]> {
     const { meta } = parseFrontmatter(content);
     if (meta.orphaned) continue;
 
-    const title = typeof meta.title === "string" ? meta.title : file.replace(/\.md$/, "");
+    const slug = file.replace(/\.md$/, "");
+    const title = typeof meta.title === "string" ? meta.title : slug;
     const tags = Array.isArray(meta.tags) ? (meta.tags as string[]) : [];
-    pages.push({ title, tags });
+    pages.push({ slug, title, tags });
   }
 
   return pages;
@@ -158,30 +160,30 @@ async function loadConceptPages(conceptsPath: string): Promise<PageInfo[]> {
  * @param pages - Array of page info objects.
  * @returns Map of tag name to array of page titles.
  */
-function groupPagesByTag(pages: PageInfo[]): Map<string, string[]> {
-  const groups = new Map<string, string[]>();
+function groupPagesByTag(pages: PageInfo[]): Map<string, PageInfo[]> {
+  const groups = new Map<string, PageInfo[]>();
 
   for (const page of pages) {
     if (page.tags.length === 0) {
-      appendToGroup(groups, "Uncategorized", page.title);
+      appendToGroup(groups, "Uncategorized", page);
       continue;
     }
 
     for (const tag of page.tags) {
-      appendToGroup(groups, tag, page.title);
+      appendToGroup(groups, tag, page);
     }
   }
 
   return groups;
 }
 
-/** Append a title to a group, creating the group if needed. */
-function appendToGroup(groups: Map<string, string[]>, key: string, title: string): void {
+/** Append a page to a group, creating the group if needed. */
+function appendToGroup(groups: Map<string, PageInfo[]>, key: string, page: PageInfo): void {
   const existing = groups.get(key);
   if (existing) {
-    existing.push(title);
+    existing.push(page);
   } else {
-    groups.set(key, [title]);
+    groups.set(key, [page]);
   }
 }
 
@@ -190,7 +192,7 @@ function appendToGroup(groups: Map<string, string[]>, key: string, title: string
  * @param tagGroups - Map of tag name to array of page titles.
  * @returns Complete MOC markdown string.
  */
-function buildMOCContent(tagGroups: Map<string, string[]>): string {
+function buildMOCContent(tagGroups: Map<string, PageInfo[]>): string {
   const lines: string[] = ["# Map of Content", ""];
 
   const sortedTags = [...tagGroups.keys()].sort((a, b) => {
@@ -201,10 +203,10 @@ function buildMOCContent(tagGroups: Map<string, string[]>): string {
   });
 
   for (const tag of sortedTags) {
-    const titles = tagGroups.get(tag) ?? [];
+    const pages = tagGroups.get(tag) ?? [];
     lines.push(`## ${tag}`, "");
-    for (const title of titles.sort()) {
-      lines.push(`- [[${title}]]`);
+    for (const page of pages.sort((a, b) => a.title.localeCompare(b.title))) {
+      lines.push(`- [[${page.slug}|${page.title}]]`);
     }
     lines.push("");
   }
