@@ -34,16 +34,23 @@ npm test         # Run all tests
 npm run dev      # Watch mode for development
 ```
 
-**Before submitting a PR, run all checks:**
+**Automatic checks via git hooks:**
+
+After `npm install`, husky wires up hooks that run automatically:
+
+- **pre-commit** — `fallow` (codebase health) and `npx tsc --noEmit` (type check)
+- **pre-push** — `npm run build` and `npm test`
+
+If a hook fails, fix the underlying issue rather than bypassing with `--no-verify`. Use `fallow fix --yes` to auto-fix unused exports, then address remaining issues manually.
+
+You can also run the full suite manually:
 
 ```bash
 npx tsc --noEmit   # Type-check
 npm run build       # Build
 npm test            # Tests
-fallow              # Codebase health (dead code, duplication, complexity)
+npx fallow          # Codebase health (dead code, duplication, complexity)
 ```
-
-All tests must pass and fallow must report no issues. Use `fallow fix --yes` to auto-fix unused exports, then fix any remaining issues manually.
 
 ### Code Style
 

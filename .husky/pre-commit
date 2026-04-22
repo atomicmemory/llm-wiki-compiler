@@ -1,0 +1,2 @@
+npx fallow
+npx tsc --noEmit
