@@ -1,18 +1,25 @@
 /**
  * Commander action for `llmwiki ingest <source>`.
- * Detects whether the source is a URL or local file, delegates to the
- * appropriate ingestion module, and saves the result as a markdown file
- * with YAML frontmatter in the sources/ directory.
+ *
+ * Detects the source type (URL, image, PDF, transcript, or generic file),
+ * delegates to the appropriate ingestion module, and saves the result as a
+ * markdown file with YAML frontmatter in the sources/ directory.
+ *
+ * Source type is persisted in frontmatter under the `sourceType` key for
+ * downstream tooling and human readers.
  */
 
 import path from "path";
 import { mkdir, writeFile } from "fs/promises";
 import { slugify, buildFrontmatter } from "../utils/markdown.js";
-import { MAX_SOURCE_CHARS, MIN_SOURCE_CHARS, SOURCES_DIR } from "../utils/constants.js";
+import { MAX_SOURCE_CHARS, MIN_SOURCE_CHARS, SOURCES_DIR, IMAGE_EXTENSIONS, TRANSCRIPT_EXTENSIONS } from "../utils/constants.js";
 import * as output from "../utils/output.js";
 import ingestWeb from "../ingest/web.js";
 import ingestFile from "../ingest/file.js";
-import type { IngestResult } from "../utils/types.js";
+import ingestPdf from "../ingest/pdf.js";
+import ingestImage from "../ingest/image.js";
+import ingestTranscript, { isYoutubeUrl } from "../ingest/transcript.js";
+import type { IngestResult, SourceType } from "../utils/types.js";
 
 /** Check whether a source string looks like a URL. */
 function isUrl(source: string): boolean {
@@ -65,17 +72,35 @@ function enforceMinContent(content: string): void {
   }
 }
 
+/** Determine the source type for a given source string. */
+export function detectSourceType(source: string): SourceType {
+  if (!isUrl(source)) {
+    const ext = path.extname(source).toLowerCase();
+    if (ext === ".pdf") return "pdf";
+    if (IMAGE_EXTENSIONS.has(ext)) return "image";
+    if (TRANSCRIPT_EXTENSIONS.has(ext)) return "transcript";
+    return "file";
+  }
+
+  if (isYoutubeUrl(source)) return "transcript";
+  return "web";
+}
+
 /** Build the full markdown document with frontmatter. */
 export function buildDocument(
   title: string,
   source: string,
   result: TruncateResult,
+  sourceType?: SourceType,
 ): string {
   const meta: Record<string, unknown> = {
     title,
     source,
     ingestedAt: new Date().toISOString(),
   };
+  if (sourceType !== undefined) {
+    meta.sourceType = sourceType;
+  }
   if (result.truncated) {
     meta.truncated = true;
     meta.originalChars = result.originalChars;
@@ -83,6 +108,25 @@ export function buildDocument(
   const frontmatter = buildFrontmatter(meta);
 
   return `${frontmatter}\n\n${result.content}\n`;
+}
+
+/** Fetch content from the appropriate ingestion module based on source type. */
+async function fetchContent(
+  source: string,
+  sourceType: SourceType,
+): Promise<{ title: string; content: string }> {
+  switch (sourceType) {
+    case "web":
+      return ingestWeb(source);
+    case "pdf":
+      return ingestPdf(source);
+    case "image":
+      return ingestImage(source);
+    case "transcript":
+      return ingestTranscript(source);
+    case "file":
+      return ingestFile(source);
+  }
 }
 
 /** Write the ingested document to the sources/ directory. */
@@ -101,19 +145,18 @@ async function saveSource(title: string, document: string): Promise<string> {
  * command but returns a structured IngestResult instead of writing to stdout.
  * Used by the MCP server's ingest_source tool.
  *
- * @param source - A URL (http/https) or a local file path (.md or .txt).
- * @returns Saved filename, character count, truncation flag, and source URI.
+ * @param source - A URL (http/https), YouTube URL, local file, PDF, or image path.
+ * @returns Saved filename, character count, truncation flag, source URI, and detected source type.
  */
 export async function ingestSource(source: string): Promise<IngestResult> {
-  output.status("*", output.info(`Ingesting: ${source}`));
+  const sourceType = detectSourceType(source);
+  output.status("*", output.info(`Ingesting [${sourceType}]: ${source}`));
 
-  const { title, content } = isUrl(source)
-    ? await ingestWeb(source)
-    : await ingestFile(source);
+  const { title, content } = await fetchContent(source, sourceType);
 
   const result = enforceCharLimit(content);
   enforceMinContent(result.content);
-  const document = buildDocument(title, source, result);
+  const document = buildDocument(title, source, result, sourceType);
   const savedPath = await saveSource(title, document);
 
   return {
@@ -121,12 +164,13 @@ export async function ingestSource(source: string): Promise<IngestResult> {
     charCount: result.content.length,
     truncated: result.truncated,
     source,
+    sourceType,
   };
 }
 
 /**
- * Ingest a source (URL or local file) and save it to the sources/ directory.
- * @param source - A URL (http/https) or a local file path (.md or .txt).
+ * Ingest a source and save it to the sources/ directory.
+ * @param source - A URL (http/https), YouTube URL, local file, PDF, or image path.
  */
 export default async function ingest(source: string): Promise<void> {
   const result = await ingestSource(source);

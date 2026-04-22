@@ -70,10 +70,15 @@ export interface QueryResult {
   saved?: string;
 }
 
+/** Source type tag persisted in frontmatter to describe the ingest origin. */
+export type SourceType = "web" | "file" | "image" | "pdf" | "transcript";
+
 /** Structured result returned by the ingest pipeline. */
 export interface IngestResult {
   filename: string;
   charCount: number;
   truncated: boolean;
   source: string;
+  /** Detected source type; undefined for legacy results produced before this field was added. */
+  sourceType?: SourceType;
 }

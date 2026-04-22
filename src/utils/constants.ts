@@ -45,6 +45,15 @@ export const INDEX_FILE = "wiki/index.md";
 export const MOC_FILE = "wiki/MOC.md";
 export const EMBEDDINGS_FILE = ".llmwiki/embeddings.json";
 
+/** Supported image file extensions for vision-based ingest. */
+export const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp"]);
+
+/** Supported transcript file extensions. */
+export const TRANSCRIPT_EXTENSIONS = new Set([".vtt", ".srt", ".txt"]);
+
+/** Max tokens for image-description completions. */
+export const IMAGE_DESCRIBE_MAX_TOKENS = 2048;
+
 /** Number of most similar pages to return from embedding-based pre-filter. */
 export const EMBEDDING_TOP_K = 15;
 
