@@ -15,6 +15,10 @@ import queryCommand from "./commands/query.js";
 import watchCommand from "./commands/watch.js";
 import lintCommand from "./commands/lint.js";
 import { schemaInitCommand, schemaShowCommand } from "./commands/schema.js";
+import reviewListCommand from "./commands/review-list.js";
+import reviewShowCommand from "./commands/review-show.js";
+import reviewApproveCommand from "./commands/review-approve.js";
+import reviewRejectCommand from "./commands/review-reject.js";
 import { startMCPServer } from "./mcp/server.js";
 import { DEFAULT_PROVIDER } from "./utils/constants.js";
 import { resolveAnthropicAuthFromEnv } from "./utils/claude-settings.js";
@@ -44,10 +48,66 @@ program
 program
   .command("compile")
   .description("Compile sources/ into an interlinked wiki")
-  .action(async () => {
+  .option(
+    "--review",
+    "Write generated pages as review candidates under .llmwiki/candidates/ instead of mutating wiki/. Orphan-marking for deleted sources is deferred until the next non-review compile.",
+  )
+  .action(async (options: { review?: boolean }) => {
     try {
       requireProvider();
-      await compileCommand();
+      await compileCommand({ review: options.review });
+    } catch (err) {
+      console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
+      process.exit(1);
+    }
+  });
+
+const reviewCommand = program
+  .command("review")
+  .description("Inspect and act on pending compile review candidates");
+
+reviewCommand
+  .command("list")
+  .description("List pending review candidates")
+  .action(async () => {
+    try {
+      await reviewListCommand();
+    } catch (err) {
+      console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
+      process.exit(1);
+    }
+  });
+
+reviewCommand
+  .command("show <id>")
+  .description("Print a single candidate's metadata and body")
+  .action(async (id: string) => {
+    try {
+      await reviewShowCommand(id);
+    } catch (err) {
+      console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
+      process.exit(1);
+    }
+  });
+
+reviewCommand
+  .command("approve <id>")
+  .description("Approve a candidate and promote it into wiki/concepts/")
+  .action(async (id: string) => {
+    try {
+      await reviewApproveCommand(id);
+    } catch (err) {
+      console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
+      process.exit(1);
+    }
+  });
+
+reviewCommand
+  .command("reject <id>")
+  .description("Reject a candidate and archive it without touching wiki/")
+  .action(async (id: string) => {
+    try {
+      await reviewRejectCommand(id);
     } catch (err) {
       console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
       process.exit(1);

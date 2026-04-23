@@ -14,9 +14,9 @@ import path from "path";
 import { mkdir, readFile, rm, writeFile } from "fs/promises";
 import { existsSync } from "fs";
 import { tmpdir } from "os";
+import { runCLI } from "./fixtures/run-cli.js";
 
 const exec = promisify(execFile);
-const CLI = path.resolve("dist/cli.js");
 
 // ---------------------------------------------------------------------------
 // Workspace helpers
@@ -30,19 +30,6 @@ async function makeTmpDir(label: string): Promise<string> {
 
 async function cleanupDir(dir: string): Promise<void> {
   await rm(dir, { recursive: true, force: true });
-}
-
-async function runCli(
-  args: string[],
-  cwd: string,
-): Promise<{ stdout: string; stderr: string; code: number }> {
-  try {
-    const { stdout, stderr } = await exec("node", [CLI, ...args], { cwd });
-    return { stdout, stderr, code: 0 };
-  } catch (err: unknown) {
-    const e = err as { stdout?: string; stderr?: string; code?: number };
-    return { stdout: e.stdout ?? "", stderr: e.stderr ?? "", code: e.code ?? 1 };
-  }
 }
 
 /** Write a minimal overview page with a given number of wikilinks to wiki/concepts/. */
@@ -90,7 +77,7 @@ describe("schema integration tests", () => {
   it("schema init writes schema.json with expected default kinds", async () => {
     const cwd = await makeTmpDir("init-fresh");
     try {
-      const result = await runCli(["schema", "init"], cwd);
+      const result = await runCLI(["schema", "init"], cwd);
       expect(result.code).toBe(0);
 
       const schemaPath = path.join(cwd, ".llmwiki", "schema.json");
@@ -113,7 +100,7 @@ describe("schema integration tests", () => {
       await writeSchemaFile(cwd, customSchema);
 
       const before = await readFile(path.join(cwd, ".llmwiki", "schema.json"), "utf-8");
-      const result = await runCli(["schema", "init"], cwd);
+      const result = await runCLI(["schema", "init"], cwd);
 
       // Should exit 0 but warn, not overwrite
       expect(result.code).toBe(0);
@@ -132,7 +119,7 @@ describe("schema integration tests", () => {
   it("schema show with no schema file prints defaults and exits 0", async () => {
     const cwd = await makeTmpDir("show-defaults");
     try {
-      const result = await runCli(["schema", "show"], cwd);
+      const result = await runCLI(["schema", "show"], cwd);
       expect(result.code).toBe(0);
       // Output should contain known default kind names
       expect(result.stdout).toContain("concept");
@@ -153,7 +140,7 @@ describe("schema integration tests", () => {
       };
       const schemaPath = await writeSchemaFile(cwd, customSchema);
 
-      const result = await runCli(["schema", "show"], cwd);
+      const result = await runCLI(["schema", "show"], cwd);
       expect(result.code).toBe(0);
       // Must mention the file path so user knows which schema is in effect
       expect(result.stdout).toContain(schemaPath);
@@ -181,7 +168,7 @@ describe("schema integration tests", () => {
       // Page has only 1 wikilink — should trigger the rule
       await writeOverviewPage(cwd, 1);
 
-      const result = await runCli(["lint"], cwd);
+      const result = await runCLI(["lint"], cwd);
       // The lint output prints the human-readable message, not the rule name
       expect(result.stdout).toContain("overview");
       expect(result.stdout).toContain("requires at least");
@@ -210,7 +197,7 @@ describe("schema integration tests", () => {
       ].join("\n");
       await writeFile(path.join(conceptsDir, "simple-concept.md"), content, "utf-8");
 
-      const result = await runCli(["lint"], cwd);
+      const result = await runCLI(["lint"], cwd);
       expect(result.stdout).not.toContain("schema-cross-link-minimum");
     } finally {
       await cleanupDir(cwd);
@@ -227,7 +214,7 @@ describe("schema integration tests", () => {
         seedPages: [],
       });
 
-      const result = await runCli(["lint"], cwd);
+      const result = await runCLI(["lint"], cwd);
       expect(result.code).toBe(0);
       // The lint command prints "Schema: <path>" so the user knows what's in effect
       expect(result.stdout).toContain(schemaPath);
