@@ -230,13 +230,16 @@ async function runCompilePipeline(
   }
 
   printChangesSummary(changes);
-  // Deletion bookkeeping (orphan marking + frozen-slug persistence) runs in
-  // both modes — it tracks deleted sources, not approved pages, so deferring
-  // it to per-approval would leave the wiki in a stale state if no candidate
-  // is ever approved. Source-state persistence for compiled sources, on the
-  // other hand, is review-deferred: those entries land at approve time so
-  // unapproved candidates remain re-detectable on subsequent compiles.
-  await markDeletedAsOrphaned(root, buckets.deleted, state);
+  // In review mode the pipeline contract is "write candidates instead of
+  // mutating wiki/". Deletion bookkeeping (orphan marking + frozen-slug
+  // persistence) writes directly into wiki/ and updates state.json, so we
+  // defer it to the next non-review compile pass. Source-state persistence
+  // for compiled sources is also review-deferred — those entries land at
+  // approve time so unapproved candidates remain re-detectable on subsequent
+  // compiles.
+  if (!options.review) {
+    await markDeletedAsOrphaned(root, buckets.deleted, state);
+  }
 
   const frozenSlugs = findFrozenSlugs(state, changes);
   reportFrozenSlugs(frozenSlugs);
@@ -250,12 +253,10 @@ async function runCompilePipeline(
 
   if (!options.review) {
     await persistExtractionStates(root, extractions);
-  }
-  if (frozenSlugs.size > 0) {
-    await orphanUnownedFrozenPages(root, frozenSlugs);
-  }
-  await persistFrozenSlugs(root, frozenSlugs, extractions);
-  if (!options.review) {
+    if (frozenSlugs.size > 0) {
+      await orphanUnownedFrozenPages(root, frozenSlugs);
+    }
+    await persistFrozenSlugs(root, frozenSlugs, extractions);
     await finalizeWiki(root, generation.pages);
   }
   return summarizeCompile(buckets, generation, extractions, options);

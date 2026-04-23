@@ -122,6 +122,21 @@ describe("review integration tests", () => {
   }, 30_000);
 
   // -------------------------------------------------------------------------
+  // compile --help advertises the --review flag
+  // -------------------------------------------------------------------------
+
+  it("compile --help documents the --review flag for discoverability", async () => {
+    const cwd = await makeTempWorkspace("compile-help-review-flag");
+    try {
+      const result = await runCLI(["compile", "--help"], cwd);
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain("--review");
+    } finally {
+      await cleanupDir(cwd);
+    }
+  }, 30_000);
+
+  // -------------------------------------------------------------------------
   // compile --review without credentials
   // -------------------------------------------------------------------------
 

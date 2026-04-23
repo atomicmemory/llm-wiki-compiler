@@ -26,7 +26,9 @@ import {
   CANDIDATES_ARCHIVE_DIR,
   CANDIDATES_DIR,
   CONCEPTS_DIR,
+  STATE_FILE,
 } from "../src/utils/constants.js";
+import type { WikiState } from "../src/utils/types.js";
 
 const VALID_BODY = [
   "---",
@@ -283,4 +285,132 @@ describe("compile --review pipeline integration", () => {
     expect(second.compiled).toBe(0);
     expect(second.skipped).toBeGreaterThanOrEqual(1);
   });
+
+  /**
+   * Regression test for the multi-candidate-per-source bug.
+   *
+   * When a single source yields multiple concepts (and therefore multiple
+   * candidates), approving the first candidate must NOT mark the source as
+   * fully compiled — otherwise the remaining pending candidates can never
+   * be regenerated, because the next compile sees the source as unchanged.
+   * Source-state is only persisted when the LAST candidate from that source
+   * is approved.
+   */
+  it("defers source-state persistence until every candidate from a source is approved", async () => {
+    await writeFile(
+      path.join(tmpDir, "sources", "topic.md"),
+      "# Topic\nA brief article covering two related concepts.",
+    );
+    await stubMultiConceptLLM();
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const first = await compileAndReport(tmpDir, { review: true });
+    expect(first.candidates).toHaveLength(2);
+
+    const [firstId, secondId] = first.candidates!;
+    await reviewApproveCommand(firstId);
+    expect(await readSourceState(tmpDir, "topic.md")).toBeUndefined();
+
+    await reviewApproveCommand(secondId);
+    expect(await readSourceState(tmpDir, "topic.md")).toBeDefined();
+
+    const followup = await compileAndReport(tmpDir, { review: true });
+    expect(followup.candidates ?? []).toHaveLength(0);
+    expect(followup.compiled).toBe(0);
+  });
+
+  /**
+   * Regression test for Finding 2: `compile --review` must NOT mutate
+   * `wiki/concepts/*.md` even when sources are deleted. Orphan-marking is
+   * deferred to the next non-review compile pass.
+   */
+  it("does not mark wiki pages orphaned when a source is deleted in review mode", async () => {
+    await seedExistingPage(tmpDir, "topic", ["topic"]);
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    // Source absent from sources/ but present in state.json → detected as deleted.
+    const result = await compileAndReport(tmpDir, { review: true });
+    expect(result.deleted).toBe(1);
+
+    const pageContent = await readFile(
+      path.join(tmpDir, CONCEPTS_DIR, "topic.md"),
+      "utf-8",
+    );
+    expect(pageContent).not.toContain("orphaned: true");
+  });
 });
+
+/** Read a single source's persisted state entry, or undefined if absent. */
+async function readSourceState(
+  root: string,
+  sourceFile: string,
+): Promise<WikiState["sources"][string] | undefined> {
+  const raw = await readFile(path.join(root, STATE_FILE), "utf-8").catch(() => "");
+  if (!raw) return undefined;
+  const state = JSON.parse(raw) as WikiState;
+  return state.sources[sourceFile];
+}
+
+/** Stub the LLM so a single source extracts to TWO concepts (one body each). */
+async function stubMultiConceptLLM(): Promise<void> {
+  const llm = await import("../src/utils/llm.js");
+  let bodyCallCount = 0;
+  vi.spyOn(llm, "callClaude").mockImplementation(async ({ tools }) => {
+    if (tools && tools.length > 0) {
+      return JSON.stringify({
+        concepts: [
+          { concept: "Alpha", summary: "First concept.", is_new: true, tags: [] },
+          { concept: "Beta", summary: "Second concept.", is_new: true, tags: [] },
+        ],
+      });
+    }
+    bodyCallCount += 1;
+    const title = bodyCallCount === 1 ? "Alpha" : "Beta";
+    const summary = bodyCallCount === 1 ? "First concept." : "Second concept.";
+    return buildValidPageBody(title, summary);
+  });
+}
+
+/** Compose a frontmatter+body page string that passes validateWikiPage. */
+function buildValidPageBody(title: string, summary: string): string {
+  return [
+    "---",
+    `title: ${title}`,
+    `summary: "${summary}"`,
+    "sources:",
+    '  - "topic.md"',
+    'createdAt: "2026-01-01T00:00:00.000Z"',
+    'updatedAt: "2026-01-01T00:00:00.000Z"',
+    "tags: []",
+    "aliases: []",
+    "---",
+    "",
+    `Body for ${title}.`,
+    "",
+  ].join("\n");
+}
+
+/** Pre-seed state.json + a wiki page for a source that will then be "deleted". */
+async function seedExistingPage(
+  root: string,
+  slug: string,
+  conceptSlugs: string[],
+): Promise<void> {
+  const state: WikiState = {
+    version: 1,
+    indexHash: "",
+    sources: {
+      "topic.md": {
+        hash: "stale-hash",
+        concepts: conceptSlugs,
+        compiledAt: "2026-01-01T00:00:00.000Z",
+      },
+    },
+  };
+  await mkdir(path.join(root, ".llmwiki"), { recursive: true });
+  await writeFile(path.join(root, STATE_FILE), JSON.stringify(state, null, 2));
+  await writeFile(
+    path.join(root, CONCEPTS_DIR, `${slug}.md`),
+    buildValidPageBody(slug, "seeded"),
+  );
+}

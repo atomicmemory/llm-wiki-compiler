@@ -49,7 +49,7 @@ program
   .description("Compile sources/ into an interlinked wiki")
   .option(
     "--review",
-    "Write generated pages as review candidates under .llmwiki/candidates/ instead of mutating wiki/",
+    "Write generated pages as review candidates under .llmwiki/candidates/ instead of mutating wiki/. Orphan-marking for deleted sources is deferred until the next non-review compile.",
   )
   .action(async (options: { review?: boolean }) => {
     try {
