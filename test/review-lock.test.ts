@@ -7,15 +7,22 @@
  * asserting the expected call sequence. A sequential two-approval test also
  * confirms that when two candidates share a source, exactly one persists the
  * source state (the second approval, when no sibling remains).
+ *
+ * TOCTOU regression: the last two describe blocks simulate a candidate
+ * disappearing between the pre-lock fast-fail read and the under-lock re-read.
+ * They confirm the commands abort cleanly (exit code 1) and produce no output
+ * artefacts (no wiki page, no archive file).
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { readFile, realpath } from "fs/promises";
+import { readFile, realpath, unlink } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
 import { writeCandidate } from "../src/compiler/candidates.js";
 import {
   CANDIDATES_DIR,
+  CANDIDATES_ARCHIVE_DIR,
+  CONCEPTS_DIR,
   STATE_FILE,
 } from "../src/utils/constants.js";
 import { useTempRoot } from "./fixtures/temp-root.js";
@@ -219,6 +226,64 @@ describe("sequential approvals — source-state persistence under lock", () => {
     const stateAfterSecond = await readStateFile(root.dir);
     expect(stateAfterSecond?.sources[SHARED_SOURCE]).toBeDefined();
     expect(stateAfterSecond?.sources[SHARED_SOURCE].hash).toBe("abc123");
+  });
+});
+
+/**
+ * Stub acquireLock so that it deletes the given candidate file before
+ * returning true, simulating a concurrent process that removed the candidate
+ * between the pre-lock fast-fail read and the lock acquisition.
+ */
+async function stubLockWithCandidateRemoval(
+  root: string,
+  candidateId: string,
+): Promise<void> {
+  const lockMod = await import("../src/utils/lock.js");
+  vi.spyOn(lockMod, "acquireLock").mockImplementation(async () => {
+    const candidateFile = path.join(root, CANDIDATES_DIR, `${candidateId}.json`);
+    await unlink(candidateFile);
+    return true;
+  });
+  vi.spyOn(lockMod, "releaseLock").mockResolvedValue(undefined);
+}
+
+describe("approve TOCTOU — candidate removed between pre-lock check and under-lock read", () => {
+  it("aborts with exit code 1 and does not write a wiki page", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const candidate = await writeSampleCandidate(root.dir, "Epsilon", "epsilon");
+    await stubLockWithCandidateRemoval(root.dir, candidate.id);
+
+    const { default: reviewApproveCommand } = await import(
+      "../src/commands/review-approve.js"
+    );
+    await reviewApproveCommand(candidate.id);
+
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0;
+
+    const wikiPage = path.join(root.dir, CONCEPTS_DIR, `${candidate.slug}.md`);
+    expect(existsSync(wikiPage)).toBe(false);
+  });
+});
+
+describe("reject TOCTOU — candidate removed between pre-lock check and under-lock read", () => {
+  it("aborts with exit code 1 and does not write an archive file", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const candidate = await writeSampleCandidate(root.dir, "Zeta", "zeta");
+    await stubLockWithCandidateRemoval(root.dir, candidate.id);
+
+    const { default: reviewRejectCommand } = await import(
+      "../src/commands/review-reject.js"
+    );
+    await reviewRejectCommand(candidate.id);
+
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0;
+
+    const archiveFile = path.join(root.dir, CANDIDATES_ARCHIVE_DIR, `${candidate.id}.json`);
+    expect(existsSync(archiveFile)).toBe(false);
   });
 });
 

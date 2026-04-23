@@ -88,6 +88,17 @@ export async function writeCandidate(
 }
 
 /**
+ * Emit a CLI error, set exit code 1, and return null. Used by candidate load
+ * helpers to avoid duplicating the error-path boilerplate.
+ * @param message - Error message to display.
+ */
+function failWithError(message: string): null {
+  output.status("!", output.error(message));
+  process.exitCode = 1;
+  return null;
+}
+
+/**
  * Load a candidate by id and, if missing, emit the standard "not found" CLI
  * error and set process.exitCode = 1. Returns null when the candidate is
  * missing so callers can early-return without re-implementing the same
@@ -100,10 +111,28 @@ export async function loadCandidateOrFail(
   id: string,
 ): Promise<ReviewCandidate | null> {
   const candidate = await readCandidate(root, id);
+  if (!candidate) return failWithError(`Candidate not found: ${id}`);
+  return candidate;
+}
+
+/**
+ * Re-read a candidate under the lock and abort if it has disappeared.
+ *
+ * This is the authoritative TOCTOU guard: a concurrent approve or reject may
+ * have removed the candidate after the pre-lock fast-fail but before the lock
+ * was acquired. Returning `null` signals the caller to abort without writing
+ * any output artefact.
+ * @param root - Project root directory.
+ * @param id - Candidate id to load.
+ * @returns The candidate if still present, or `null` after setting exit code 1.
+ */
+export async function loadCandidateUnderLockOrFail(
+  root: string,
+  id: string,
+): Promise<ReviewCandidate | null> {
+  const candidate = await readCandidate(root, id);
   if (!candidate) {
-    output.status("!", output.error(`Candidate not found: ${id}`));
-    process.exitCode = 1;
-    return null;
+    return failWithError(`Candidate ${id} was removed by another process during review.`);
   }
   return candidate;
 }
