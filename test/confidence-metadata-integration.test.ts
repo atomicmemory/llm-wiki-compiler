@@ -12,7 +12,7 @@
  *     sources/                  ← empty dir so broken-citation rule finds nothing
  */
 
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect } from "vitest";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import path from "path";
@@ -89,9 +89,7 @@ function assertNoConfidenceFindings(stdout: string): void {
 // ---------------------------------------------------------------------------
 
 describe("confidence metadata — CLI lint integration", () => {
-  beforeAll(async () => {
-    await execFileAsync("npx", ["tsup"], { cwd: path.resolve(".") });
-  }, 60_000);
+  // dist/cli.js is built once via vitest globalSetup (test/global-setup.ts)
 
   // -------------------------------------------------------------------------
   // low-confidence rule
