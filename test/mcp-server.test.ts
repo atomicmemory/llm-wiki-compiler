@@ -189,6 +189,37 @@ describe("wiki_status tool", () => {
     }));
     expect(afterFiles).toEqual(beforeFiles);
   });
+
+  it("reports pendingCandidates equal to the number of valid candidate files", async () => {
+    const candidatesDir = path.join(root, ".llmwiki", "candidates");
+    await mkdir(candidatesDir, { recursive: true });
+    const validCandidates = [
+      { id: "alpha-aaaaaaaa", slug: "alpha", title: "Alpha" },
+      { id: "beta-bbbbbbbb", slug: "beta", title: "Beta" },
+    ];
+    for (const seed of validCandidates) {
+      await writeFile(
+        path.join(candidatesDir, `${seed.id}.json`),
+        JSON.stringify({
+          id: seed.id,
+          title: seed.title,
+          slug: seed.slug,
+          summary: "Summary",
+          sources: ["source.md"],
+          body: "body",
+          generatedAt: new Date().toISOString(),
+        }),
+        "utf-8",
+      );
+    }
+    // A malformed JSON file should NOT inflate pendingCandidates.
+    await writeFile(path.join(candidatesDir, "broken.json"), "not json", "utf-8");
+
+    const server = buildServer();
+    const result = await callTool(server, "wiki_status", {});
+    const status = result.structuredContent?.result as { pendingCandidates: number };
+    expect(status.pendingCandidates).toBe(validCandidates.length);
+  });
 });
 
 describe("error handling", () => {

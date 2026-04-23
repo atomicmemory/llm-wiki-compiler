@@ -45,8 +45,18 @@ export const INDEX_FILE = "wiki/index.md";
 export const MOC_FILE = "wiki/MOC.md";
 export const EMBEDDINGS_FILE = ".llmwiki/embeddings.json";
 
+/** Pending review candidates awaiting approval/rejection. */
+export const CANDIDATES_DIR = ".llmwiki/candidates";
+
+/** Rejected review candidates archived for audit (not deleted). */
+export const CANDIDATES_ARCHIVE_DIR = ".llmwiki/candidates/archive";
+
 /** Number of most similar pages to return from embedding-based pre-filter. */
 export const EMBEDDING_TOP_K = 15;
+
+/** Provenance metadata thresholds used by lint rules. */
+export const LOW_CONFIDENCE_THRESHOLD = 0.5;
+export const MAX_INFERRED_PARAGRAPHS_WITHOUT_CITATIONS = 2;
 
 /** Embedding model to use per provider. */
 export const EMBEDDING_MODELS: Record<string, string> = {
