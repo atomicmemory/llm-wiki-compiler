@@ -4,11 +4,10 @@
  * integration test stubs the LLM provider so no network calls are made.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtemp, mkdir, readdir, readFile, writeFile, rm } from "fs/promises";
+import { describe, it, expect, vi } from "vitest";
+import { mkdir, writeFile, readdir, readFile } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
-import os from "os";
 import {
   archiveCandidate,
   countCandidates,
@@ -28,6 +27,7 @@ import {
   CONCEPTS_DIR,
   STATE_FILE,
 } from "../src/utils/constants.js";
+import { useTempRoot } from "./fixtures/temp-root.js";
 import type { WikiState } from "../src/utils/types.js";
 
 const VALID_BODY = [
@@ -46,23 +46,7 @@ const VALID_BODY = [
   "",
 ].join("\n");
 
-let tmpDir: string;
-let originalCwd: string;
-
-beforeEach(async () => {
-  tmpDir = await mkdtemp(path.join(os.tmpdir(), "review-test-"));
-  await mkdir(path.join(tmpDir, "wiki/concepts"), { recursive: true });
-  await mkdir(path.join(tmpDir, "wiki/queries"), { recursive: true });
-  await mkdir(path.join(tmpDir, "sources"), { recursive: true });
-  originalCwd = process.cwd();
-  process.chdir(tmpDir);
-});
-
-afterEach(async () => {
-  process.chdir(originalCwd);
-  await rm(tmpDir, { recursive: true, force: true });
-  vi.restoreAllMocks();
-});
+const root = useTempRoot(["sources"]);
 
 function sampleDraft(slug = "sample-concept") {
   return {
@@ -76,70 +60,70 @@ function sampleDraft(slug = "sample-concept") {
 
 describe("candidates module", () => {
   it("writes a candidate JSON file under .llmwiki/candidates/", async () => {
-    const candidate = await writeCandidate(tmpDir, sampleDraft());
+    const candidate = await writeCandidate(root.dir, sampleDraft());
     expect(candidate.id).toMatch(/^sample-concept-[0-9a-f]+$/);
 
-    const filePath = path.join(tmpDir, CANDIDATES_DIR, `${candidate.id}.json`);
+    const filePath = path.join(root.dir, CANDIDATES_DIR, `${candidate.id}.json`);
     expect(existsSync(filePath)).toBe(true);
   });
 
   it("reads back a written candidate verbatim", async () => {
-    const candidate = await writeCandidate(tmpDir, sampleDraft());
-    const loaded = await readCandidate(tmpDir, candidate.id);
+    const candidate = await writeCandidate(root.dir, sampleDraft());
+    const loaded = await readCandidate(root.dir, candidate.id);
     expect(loaded).toEqual(candidate);
   });
 
   it("lists pending candidates sorted by generation time", async () => {
-    const first = await writeCandidate(tmpDir, sampleDraft("alpha"));
+    const first = await writeCandidate(root.dir, sampleDraft("alpha"));
     // Sleep-free ordering: rewrite generatedAt explicitly so the test never races.
-    const filePath = path.join(tmpDir, CANDIDATES_DIR, `${first.id}.json`);
+    const filePath = path.join(root.dir, CANDIDATES_DIR, `${first.id}.json`);
     const earlier = { ...first, generatedAt: "2025-01-01T00:00:00.000Z" };
     await writeFile(filePath, JSON.stringify(earlier, null, 2));
 
-    const second = await writeCandidate(tmpDir, sampleDraft("beta"));
-    const all = await listCandidates(tmpDir);
+    const second = await writeCandidate(root.dir, sampleDraft("beta"));
+    const all = await listCandidates(root.dir);
     expect(all.map((c) => c.id)).toEqual([first.id, second.id]);
   });
 
   it("counts candidates without parsing each file body", async () => {
-    await writeCandidate(tmpDir, sampleDraft("alpha"));
-    await writeCandidate(tmpDir, sampleDraft("beta"));
-    expect(await countCandidates(tmpDir)).toBe(2);
+    await writeCandidate(root.dir, sampleDraft("alpha"));
+    await writeCandidate(root.dir, sampleDraft("beta"));
+    expect(await countCandidates(root.dir)).toBe(2);
   });
 
   it("countCandidates and listCandidates agree even with malformed JSON files", async () => {
-    await writeCandidate(tmpDir, sampleDraft("good"));
+    await writeCandidate(root.dir, sampleDraft("good"));
     // Drop a syntactically-broken candidate file alongside the valid one.
-    const candidatesDir = path.join(tmpDir, CANDIDATES_DIR);
+    const candidatesDir = path.join(root.dir, CANDIDATES_DIR);
     await writeFile(
       path.join(candidatesDir, "broken-candidate.json"),
       "{ this is not valid json",
       "utf-8",
     );
 
-    const listed = await listCandidates(tmpDir);
-    const counted = await countCandidates(tmpDir);
+    const listed = await listCandidates(root.dir);
+    const counted = await countCandidates(root.dir);
     expect(counted).toBe(listed.length);
     expect(counted).toBe(1);
   });
 
   it("returns null when reading a missing candidate", async () => {
-    expect(await readCandidate(tmpDir, "no-such-id")).toBeNull();
+    expect(await readCandidate(root.dir, "no-such-id")).toBeNull();
   });
 
   it("deletes a candidate and reports whether it existed", async () => {
-    const candidate = await writeCandidate(tmpDir, sampleDraft());
-    expect(await deleteCandidate(tmpDir, candidate.id)).toBe(true);
-    expect(existsSync(path.join(tmpDir, CANDIDATES_DIR, `${candidate.id}.json`))).toBe(false);
-    expect(await deleteCandidate(tmpDir, candidate.id)).toBe(false);
+    const candidate = await writeCandidate(root.dir, sampleDraft());
+    expect(await deleteCandidate(root.dir, candidate.id)).toBe(true);
+    expect(existsSync(path.join(root.dir, CANDIDATES_DIR, `${candidate.id}.json`))).toBe(false);
+    expect(await deleteCandidate(root.dir, candidate.id)).toBe(false);
   });
 
   it("archives a rejected candidate without removing the record", async () => {
-    const candidate = await writeCandidate(tmpDir, sampleDraft());
-    expect(await archiveCandidate(tmpDir, candidate.id)).toBe(true);
+    const candidate = await writeCandidate(root.dir, sampleDraft());
+    expect(await archiveCandidate(root.dir, candidate.id)).toBe(true);
 
-    const pending = path.join(tmpDir, CANDIDATES_DIR, `${candidate.id}.json`);
-    const archived = path.join(tmpDir, CANDIDATES_ARCHIVE_DIR, `${candidate.id}.json`);
+    const pending = path.join(root.dir, CANDIDATES_DIR, `${candidate.id}.json`);
+    const archived = path.join(root.dir, CANDIDATES_ARCHIVE_DIR, `${candidate.id}.json`);
     expect(existsSync(pending)).toBe(false);
     expect(existsSync(archived)).toBe(true);
   });
@@ -147,30 +131,30 @@ describe("candidates module", () => {
 
 describe("review approve command", () => {
   it("writes the candidate body into wiki/concepts and clears the candidate", async () => {
-    const candidate = await writeCandidate(tmpDir, sampleDraft());
+    const candidate = await writeCandidate(root.dir, sampleDraft());
     vi.spyOn(console, "log").mockImplementation(() => {});
 
     await reviewApproveCommand(candidate.id);
 
-    const pagePath = path.join(tmpDir, CONCEPTS_DIR, "sample-concept.md");
+    const pagePath = path.join(root.dir, CONCEPTS_DIR, "sample-concept.md");
     expect(existsSync(pagePath)).toBe(true);
     const content = await readFile(pagePath, "utf-8");
     expect(content).toBe(VALID_BODY);
 
-    const candidateFile = path.join(tmpDir, CANDIDATES_DIR, `${candidate.id}.json`);
+    const candidateFile = path.join(root.dir, CANDIDATES_DIR, `${candidate.id}.json`);
     expect(existsSync(candidateFile)).toBe(false);
   });
 
   it("rejects approval when the candidate body is invalid", async () => {
     const draft = { ...sampleDraft("broken"), body: "no frontmatter here" };
-    const candidate = await writeCandidate(tmpDir, draft);
+    const candidate = await writeCandidate(root.dir, draft);
     vi.spyOn(console, "log").mockImplementation(() => {});
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await reviewApproveCommand(candidate.id);
 
     expect(process.exitCode).toBe(1);
-    expect(existsSync(path.join(tmpDir, CONCEPTS_DIR, "broken.md"))).toBe(false);
+    expect(existsSync(path.join(root.dir, CONCEPTS_DIR, "broken.md"))).toBe(false);
     process.exitCode = 0;
     errorSpy.mockRestore();
   });
@@ -178,13 +162,13 @@ describe("review approve command", () => {
 
 describe("review reject command", () => {
   it("archives the candidate without touching wiki/concepts", async () => {
-    const candidate = await writeCandidate(tmpDir, sampleDraft());
+    const candidate = await writeCandidate(root.dir, sampleDraft());
     vi.spyOn(console, "log").mockImplementation(() => {});
 
     await reviewRejectCommand(candidate.id);
 
-    expect(existsSync(path.join(tmpDir, CONCEPTS_DIR, "sample-concept.md"))).toBe(false);
-    const archivePath = path.join(tmpDir, CANDIDATES_ARCHIVE_DIR, `${candidate.id}.json`);
+    expect(existsSync(path.join(root.dir, CONCEPTS_DIR, "sample-concept.md"))).toBe(false);
+    const archivePath = path.join(root.dir, CANDIDATES_ARCHIVE_DIR, `${candidate.id}.json`);
     expect(existsSync(archivePath)).toBe(true);
   });
 
@@ -205,7 +189,7 @@ describe("review list and show commands", () => {
   });
 
   it("show prints the candidate id, slug, and body", async () => {
-    const candidate = await writeCandidate(tmpDir, sampleDraft());
+    const candidate = await writeCandidate(root.dir, sampleDraft());
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     await reviewShowCommand(candidate.id);
     const allOutput = logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
@@ -218,7 +202,7 @@ describe("review list and show commands", () => {
 describe("compile --review pipeline integration", () => {
   it("creates candidates and leaves wiki/ untouched", async () => {
     await writeFile(
-      path.join(tmpDir, "sources", "topic.md"),
+      path.join(root.dir, "sources", "topic.md"),
       "# Topic\nA brief article about a single topic.",
     );
 
@@ -234,15 +218,15 @@ describe("compile --review pipeline integration", () => {
       return "## Topic\n\nThe page body for the topic.";
     });
 
-    const result = await compileAndReport(tmpDir, { review: true });
+    const result = await compileAndReport(root.dir, { review: true });
     expect(callSpy).toHaveBeenCalled();
     expect(result.candidates ?? []).toHaveLength(1);
 
     // Pages on disk: only the candidate, never the wiki page.
-    const conceptsDir = path.join(tmpDir, CONCEPTS_DIR);
+    const conceptsDir = path.join(root.dir, CONCEPTS_DIR);
     expect(existsSync(path.join(conceptsDir, "topic.md"))).toBe(false);
 
-    const candidateFiles = await readdir(path.join(tmpDir, CANDIDATES_DIR));
+    const candidateFiles = await readdir(path.join(root.dir, CANDIDATES_DIR));
     expect(candidateFiles.filter((f) => f.endsWith(".json"))).toHaveLength(1);
   });
 
@@ -257,7 +241,7 @@ describe("compile --review pipeline integration", () => {
    */
   it("does not regenerate a candidate for a source that was approved", async () => {
     await writeFile(
-      path.join(tmpDir, "sources", "topic.md"),
+      path.join(root.dir, "sources", "topic.md"),
       "# Topic\nA brief article about a single topic.",
     );
 
@@ -274,13 +258,13 @@ describe("compile --review pipeline integration", () => {
     });
     vi.spyOn(console, "log").mockImplementation(() => {});
 
-    const first = await compileAndReport(tmpDir, { review: true });
+    const first = await compileAndReport(root.dir, { review: true });
     expect(first.candidates).toHaveLength(1);
 
     const candidateId = first.candidates![0];
     await reviewApproveCommand(candidateId);
 
-    const second = await compileAndReport(tmpDir, { review: true });
+    const second = await compileAndReport(root.dir, { review: true });
     expect(second.candidates ?? []).toHaveLength(0);
     expect(second.compiled).toBe(0);
     expect(second.skipped).toBeGreaterThanOrEqual(1);
@@ -298,23 +282,23 @@ describe("compile --review pipeline integration", () => {
    */
   it("defers source-state persistence until every candidate from a source is approved", async () => {
     await writeFile(
-      path.join(tmpDir, "sources", "topic.md"),
+      path.join(root.dir, "sources", "topic.md"),
       "# Topic\nA brief article covering two related concepts.",
     );
     await stubMultiConceptLLM();
     vi.spyOn(console, "log").mockImplementation(() => {});
 
-    const first = await compileAndReport(tmpDir, { review: true });
+    const first = await compileAndReport(root.dir, { review: true });
     expect(first.candidates).toHaveLength(2);
 
     const [firstId, secondId] = first.candidates!;
     await reviewApproveCommand(firstId);
-    expect(await readSourceState(tmpDir, "topic.md")).toBeUndefined();
+    expect(await readSourceState(root.dir, "topic.md")).toBeUndefined();
 
     await reviewApproveCommand(secondId);
-    expect(await readSourceState(tmpDir, "topic.md")).toBeDefined();
+    expect(await readSourceState(root.dir, "topic.md")).toBeDefined();
 
-    const followup = await compileAndReport(tmpDir, { review: true });
+    const followup = await compileAndReport(root.dir, { review: true });
     expect(followup.candidates ?? []).toHaveLength(0);
     expect(followup.compiled).toBe(0);
   });
@@ -325,15 +309,15 @@ describe("compile --review pipeline integration", () => {
    * deferred to the next non-review compile pass.
    */
   it("does not mark wiki pages orphaned when a source is deleted in review mode", async () => {
-    await seedExistingPage(tmpDir, "topic", ["topic"]);
+    await seedExistingPage(root.dir, "topic", ["topic"]);
     vi.spyOn(console, "log").mockImplementation(() => {});
 
     // Source absent from sources/ but present in state.json → detected as deleted.
-    const result = await compileAndReport(tmpDir, { review: true });
+    const result = await compileAndReport(root.dir, { review: true });
     expect(result.deleted).toBe(1);
 
     const pageContent = await readFile(
-      path.join(tmpDir, CONCEPTS_DIR, "topic.md"),
+      path.join(root.dir, CONCEPTS_DIR, "topic.md"),
       "utf-8",
     );
     expect(pageContent).not.toContain("orphaned: true");

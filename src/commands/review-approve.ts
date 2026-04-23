@@ -5,6 +5,11 @@
  * wiki/concepts/<slug>.md, refreshes the index/MOC, updates embeddings, and
  * removes the candidate file. Approval never re-invokes the LLM — the body
  * stored in the candidate is written verbatim.
+ *
+ * All mutations are performed under `.llmwiki/lock` to prevent races with a
+ * concurrent compile or sibling approve/reject. The lock is acquired before
+ * the `listCandidates` call inside `persistCandidateSourceStates` so that the
+ * sibling-candidate read is also serialized.
  */
 
 import path from "path";
@@ -22,6 +27,7 @@ import { generateMOC } from "../compiler/obsidian.js";
 import { resolveLinks } from "../compiler/resolver.js";
 import { updateEmbeddings } from "../utils/embeddings.js";
 import { updateSourceState } from "../utils/state.js";
+import { acquireLock, releaseLock } from "../utils/lock.js";
 import { CONCEPTS_DIR } from "../utils/constants.js";
 import * as output from "../utils/output.js";
 import type { ReviewCandidate } from "../utils/types.js";
@@ -38,6 +44,29 @@ export default async function reviewApproveCommand(id: string): Promise<void> {
     return;
   }
 
+  const locked = await acquireLock(root);
+  if (!locked) {
+    output.status("!", output.error("Could not acquire lock. Try again later."));
+    process.exitCode = 1;
+    return;
+  }
+
+  try {
+    await approveUnderLock(root, id, candidate);
+  } finally {
+    await releaseLock(root);
+  }
+}
+
+/**
+ * Perform all wiki mutations for an approval while holding the lock.
+ * Separated so the lock acquire/release wrapper stays under 40 lines.
+ */
+async function approveUnderLock(
+  root: string,
+  id: string,
+  candidate: ReviewCandidate,
+): Promise<void> {
   const pagePath = path.join(root, CONCEPTS_DIR, `${candidate.slug}.md`);
   await atomicWrite(pagePath, candidate.body);
   output.status("+", output.success(`Approved → ${output.source(pagePath)}`));
