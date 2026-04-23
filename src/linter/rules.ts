@@ -14,6 +14,7 @@ import {
   isMalformedCitationEntry,
   parseFrontmatter,
   parseProvenanceMetadata,
+  safeReadFile,
   slugify,
 } from "../utils/markdown.js";
 import {
@@ -327,22 +328,58 @@ function countUncitedProseParagraphs(body: string): number {
   return count;
 }
 
+/** Regex matching the `:start-end` span suffix on a citation entry. */
+const COLON_SPAN_PATTERN = /^[^:#]+:(\d+)(?:-(\d+))?$/;
+
+/** Regex matching the `#Lstart-Lend` span suffix on a citation entry. */
+const HASH_SPAN_PATTERN = /^[^:#]+#L(\d+)(?:-L(\d+))?$/;
+
+/** Parsed line range from a citation entry, or null if no range is present. */
+interface ParsedLineRange {
+  start: number;
+  end: number;
+}
+
+/** Extract the line range from a citation entry string, or return null if there is none. */
+function parseLineRange(entry: string): ParsedLineRange | null {
+  const colonMatch = COLON_SPAN_PATTERN.exec(entry);
+  if (colonMatch) {
+    const start = Number(colonMatch[1]);
+    const end = colonMatch[2] !== undefined ? Number(colonMatch[2]) : start;
+    return { start, end };
+  }
+  const hashMatch = HASH_SPAN_PATTERN.exec(entry);
+  if (hashMatch) {
+    const start = Number(hashMatch[1]);
+    const end = hashMatch[2] !== undefined ? Number(hashMatch[2]) : start;
+    return { start, end };
+  }
+  return null;
+}
+
+/** Count the number of lines in a file's text content. */
+function countLines(content: string): number {
+  if (content.length === 0) return 0;
+  return content.split("\n").length;
+}
+
 /**
- * Find ^[filename.md] citations referencing source files that don't exist.
+ * Find ^[filename.md] citations referencing source files that don't exist, and
+ * flag claim-level spans whose line ranges exceed the source file's actual length.
  * Handles both single-source ^[file.md] and multi-source ^[a.md, b.md] forms,
- * plus the claim-level extension `^[file.md:42-58]` / `^[file.md#L42-L58]` —
- * line/range suffixes are stripped before checking the filename against the
- * sources directory because line ranges have no on-disk representation to
- * validate.
+ * plus the claim-level extension `^[file.md:42-58]` / `^[file.md#L42-L58]`.
+ * Line counts are cached per source file to avoid redundant reads.
  */
 export async function checkBrokenCitations(root: string): Promise<LintResult[]> {
   const pages = await collectAllPages(root);
   const sourcesDir = path.join(root, SOURCES_DIR);
   const results: LintResult[] = [];
+  /** Cache of source filename → line count to avoid repeated reads. */
+  const lineCountCache = new Map<string, number>();
 
   for (const page of pages) {
     for (const { captured, line } of findMatchesInContent(page.content, CITATION_PATTERN)) {
-      collectBrokenForMarker(captured, line, page.filePath, sourcesDir, results);
+      await collectBrokenForMarker(captured, line, page.filePath, sourcesDir, lineCountCache, results);
     }
   }
 
@@ -350,27 +387,55 @@ export async function checkBrokenCitations(root: string): Promise<LintResult[]> 
 }
 
 /** Append broken-citation diagnostics for every entry inside a single ^[...] marker. */
-function collectBrokenForMarker(
+async function collectBrokenForMarker(
   captured: string,
   line: number,
   pageFile: string,
   sourcesDir: string,
+  lineCountCache: Map<string, number>,
   out: LintResult[],
-): void {
+): Promise<void> {
   for (const part of captured.split(",")) {
     const trimmed = part.trim();
     if (trimmed.length === 0) continue;
     const filename = stripSpanSuffix(trimmed);
     const citedPath = path.join(sourcesDir, filename);
-    if (existsSync(citedPath)) continue;
+    if (!existsSync(citedPath)) {
+      out.push({
+        rule: "broken-citation",
+        severity: "error",
+        file: pageFile,
+        message: `Broken citation ^[${filename}] — source file not found`,
+        line,
+      });
+      continue;
+    }
+    const range = parseLineRange(trimmed);
+    if (range === null) continue;
+    const lineCount = await resolveLineCount(citedPath, filename, lineCountCache);
+    if (range.end <= lineCount) continue;
     out.push({
       rule: "broken-citation",
       severity: "error",
       file: pageFile,
-      message: `Broken citation ^[${filename}] — source file not found`,
+      message: `Claim-level span ^[${trimmed}] is out of bounds (source has only ${lineCount} lines)`,
       line,
     });
   }
+}
+
+/** Return the line count for a source file, reading and caching if necessary. */
+async function resolveLineCount(
+  citedPath: string,
+  filename: string,
+  cache: Map<string, number>,
+): Promise<number> {
+  const cached = cache.get(filename);
+  if (cached !== undefined) return cached;
+  const content = await safeReadFile(citedPath);
+  const lineCount = countLines(content);
+  cache.set(filename, lineCount);
+  return lineCount;
 }
 
 /**

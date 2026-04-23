@@ -258,3 +258,59 @@ describe("checkMalformedClaimCitations", () => {
     expect(results[0].rule).toBe("malformed-claim-citation");
   });
 });
+
+/** 3-line source content used in out-of-bounds span tests. */
+const THREE_LINE_SOURCE = "Line 1\nLine 2\nLine 3";
+
+/** 100-line source content used in in-bounds span test. */
+const HUNDRED_LINE_SOURCE = Array.from({ length: 100 }, (_, i) => `Line ${i + 1}`).join("\n");
+
+/**
+ * Write src.md with the given content and a concept page citing it with the
+ * given marker text, then run checkBrokenCitations and return the findings.
+ */
+async function lintWithSpan(sourceContent: string, marker: string): Promise<import("../src/linter/types.js").LintResult[]> {
+  await writeSource("src.md", sourceContent);
+  await writeConcept("page", `---\ntitle: T\n---\nClaim. ${marker}`);
+  return checkBrokenCitations(tmpDir);
+}
+
+/** Assert that a single out-of-bounds broken-citation finding was emitted. */
+function expectOutOfBounds(results: import("../src/linter/types.js").LintResult[]): void {
+  expect(results).toHaveLength(1);
+  expect(results[0].rule).toBe("broken-citation");
+  expect(results[0].message).toContain("out of bounds");
+}
+
+describe("checkBrokenCitations — out-of-bounds span detection", () => {
+  it("reports no findings for a colon span within the source line count", async () => {
+    const results = await lintWithSpan(THREE_LINE_SOURCE, "^[src.md:1-3]");
+    expect(results).toHaveLength(0);
+  });
+
+  it("flags a colon span whose end exceeds the source line count", async () => {
+    const results = await lintWithSpan(THREE_LINE_SOURCE, "^[src.md:1-5]");
+    expectOutOfBounds(results);
+    expect(results[0].message).toContain("3 lines");
+  });
+
+  it("flags a colon span entirely beyond the source line count", async () => {
+    const results = await lintWithSpan(THREE_LINE_SOURCE, "^[src.md:5-7]");
+    expectOutOfBounds(results);
+  });
+
+  it("reports no findings for a hash span within the source line count", async () => {
+    const results = await lintWithSpan(THREE_LINE_SOURCE, "^[src.md#L1-L3]");
+    expect(results).toHaveLength(0);
+  });
+
+  it("flags a hash span whose end exceeds the source line count", async () => {
+    const results = await lintWithSpan(THREE_LINE_SOURCE, "^[src.md#L4-L6]");
+    expectOutOfBounds(results);
+  });
+
+  it("reports no findings for a span well within a 100-line source", async () => {
+    const results = await lintWithSpan(HUNDRED_LINE_SOURCE, "^[src.md:42-58]");
+    expect(results).toHaveLength(0);
+  });
+});

@@ -88,12 +88,12 @@ describe("compile-path claim-level marker preservation", () => {
   });
 
   it("claim markers on disk parse to correct SourceSpan via extractClaimCitations", async () => {
-    const body = await compileAndReadBody(ctx.dir, "Parsed claim. ^[source.md:42-58]");
+    const body = await compileAndReadBody(ctx.dir, "Parsed claim. ^[source.md:3-7]");
     const citations = extractClaimCitations(body);
 
     expect(citations).toHaveLength(1);
     expect(citations[0].spans).toEqual([
-      { file: "source.md", lines: { start: 42, end: 58 } },
+      { file: "source.md", lines: { start: 3, end: 7 } },
     ]);
   });
 });
