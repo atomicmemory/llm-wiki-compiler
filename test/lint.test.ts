@@ -5,9 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, mkdir, writeFile, rm } from "fs/promises";
-import path from "path";
-import os from "os";
+import { rm } from "fs/promises";
 import {
   checkBrokenWikilinks,
   checkOrphanedPages,
@@ -17,34 +15,24 @@ import {
   checkBrokenCitations,
 } from "../src/linter/rules.js";
 import { lint } from "../src/linter/index.js";
+import { makeLintTempRoot } from "./fixtures/lint-temp-root.js";
 
 let tmpDir: string;
+let writeConcept: (slug: string, content: string) => Promise<void>;
+let writeQuery: (slug: string, content: string) => Promise<void>;
+let writeSource: (name: string, content: string) => Promise<void>;
 
 beforeEach(async () => {
-  tmpDir = await mkdtemp(path.join(os.tmpdir(), "lint-test-"));
-  await mkdir(path.join(tmpDir, "wiki", "concepts"), { recursive: true });
-  await mkdir(path.join(tmpDir, "wiki", "queries"), { recursive: true });
-  await mkdir(path.join(tmpDir, "sources"), { recursive: true });
+  const fx = await makeLintTempRoot("lint-test");
+  tmpDir = fx.root;
+  writeConcept = fx.writeConceptPage;
+  writeQuery = fx.writeQueryPage;
+  writeSource = fx.writeSourceFile;
 });
 
 afterEach(async () => {
   await rm(tmpDir, { recursive: true, force: true });
 });
-
-/** Helper to write a wiki page to the concepts directory. */
-async function writeConcept(slug: string, content: string): Promise<void> {
-  await writeFile(path.join(tmpDir, "wiki", "concepts", `${slug}.md`), content);
-}
-
-/** Helper to write a wiki page to the queries directory. */
-async function writeQuery(slug: string, content: string): Promise<void> {
-  await writeFile(path.join(tmpDir, "wiki", "queries", `${slug}.md`), content);
-}
-
-/** Helper to write a source file. */
-async function writeSource(name: string, content: string): Promise<void> {
-  await writeFile(path.join(tmpDir, "sources", name), content);
-}
 
 describe("checkBrokenWikilinks", () => {
   it("returns no results when all wikilinks are valid", async () => {
@@ -205,6 +193,36 @@ describe("checkBrokenCitations", () => {
     const results = await checkBrokenCitations(tmpDir);
     expect(results).toHaveLength(1);
     expect(results[0].line).toBe(5);
+  });
+
+  it("accepts a multi-source citation where both files exist", async () => {
+    await writeSource("a.md", "Source A.");
+    await writeSource("b.md", "Source B.");
+    await writeConcept("multi", "---\ntitle: Multi\n---\nDrawn from both sources. ^[a.md, b.md]");
+
+    const results = await checkBrokenCitations(tmpDir);
+    expect(results).toHaveLength(0);
+  });
+
+  it("reports only the missing file in a multi-source citation", async () => {
+    await writeSource("a.md", "Source A.");
+    await writeConcept("partial", "---\ntitle: Partial\n---\nPartially cited. ^[a.md, missing.md]");
+
+    const results = await checkBrokenCitations(tmpDir);
+    expect(results).toHaveLength(1);
+    expect(results[0].message).toContain("missing.md");
+    expect(results[0].message).not.toContain("a.md");
+  });
+
+  it("does not treat the whole comma-joined text as one filename", async () => {
+    await writeSource("a.md", "Source A.");
+    await writeSource("b.md", "Source B.");
+    // If the rule naively checked "a.md, b.md" as one filename it would fail.
+    await writeConcept("joint", "---\ntitle: Joint\n---\nJoint citation. ^[a.md, b.md]");
+
+    const results = await checkBrokenCitations(tmpDir);
+    // Neither "a.md" nor "b.md" is missing, so there should be no findings.
+    expect(results.some((r) => r.message.includes("a.md, b.md"))).toBe(false);
   });
 });
 
