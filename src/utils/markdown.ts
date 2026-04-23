@@ -20,6 +20,9 @@ const CITATION_MARKER_PATTERN = /\^\[([^\]]+)\]/g;
 /** Regex matching the optional `:start-end` or `#Lstart-Lend` span suffix on a citation entry. */
 const SPAN_SUFFIX_PATTERN = /^(?<file>[^:#]+)(?:(?::(?<colonStart>\d+)(?:-(?<colonEnd>\d+))?)|(?:#L(?<hashStart>\d+)(?:-L(?<hashEnd>\d+))?))?$/;
 
+/** The minimum valid line number in a source span (lines are 1-indexed). */
+const MIN_LINE_NUMBER = 1;
+
 /** The set of valid provenance state strings, used to reject unknown values. */
 const VALID_PROVENANCE_STATES: ReadonlySet<ProvenanceState> = new Set([
   "extracted",
@@ -129,13 +132,19 @@ function parseCitationEntries(inner: string): SourceSpan[] {
   for (const part of inner.split(",")) {
     const trimmed = part.trim();
     if (trimmed.length === 0) continue;
-    spans.push(parseSpanEntry(trimmed));
+    const span = parseSpanEntry(trimmed);
+    // Skip entries with invalid line ranges — the linter flags them separately.
+    if (span !== undefined) spans.push(span);
   }
   return spans;
 }
 
-/** Parse a single citation entry (`file.md` / `file.md:1-3` / `file.md#L1-L3`). */
-function parseSpanEntry(entry: string): SourceSpan {
+/**
+ * Parse a single citation entry (`file.md` / `file.md:1-3` / `file.md#L1-L3`).
+ * Returns undefined when the parsed line range is semantically invalid (line
+ * numbers must be >= 1 and end must be >= start).
+ */
+function parseSpanEntry(entry: string): SourceSpan | undefined {
   const match = SPAN_SUFFIX_PATTERN.exec(entry);
   if (!match || !match.groups) {
     return { file: entry };
@@ -146,12 +155,19 @@ function parseSpanEntry(entry: string): SourceSpan {
   if (start === undefined) return { file };
   const startLine = Number(start);
   const endLine = end === undefined ? startLine : Number(end);
+  if (!isValidLineRange(startLine, endLine)) return undefined;
   return { file, lines: { start: startLine, end: endLine } };
+}
+
+/** Returns true when both lines are >= 1 and end is not before start. */
+function isValidLineRange(start: number, end: number): boolean {
+  return start >= MIN_LINE_NUMBER && end >= start;
 }
 
 /**
  * Detect whether a citation entry is malformed: bracket text that contains
- * `:` or `#` characters but does not match the documented span grammar.
+ * `:` or `#` characters but does not match the documented span grammar, or
+ * contains a semantically invalid line range (line 0 or end before start).
  * Used by the linter to flag broken claim-level provenance markers.
  */
 export function isMalformedCitationEntry(entry: string): boolean {
@@ -159,7 +175,14 @@ export function isMalformedCitationEntry(entry: string): boolean {
   if (trimmed.length === 0) return true;
   if (!trimmed.includes(":") && !trimmed.includes("#")) return false;
   const match = SPAN_SUFFIX_PATTERN.exec(trimmed);
-  return !match;
+  if (!match || !match.groups) return true;
+  const { colonStart, colonEnd, hashStart, hashEnd } = match.groups;
+  const start = colonStart ?? hashStart;
+  const end = colonEnd ?? hashEnd;
+  if (start === undefined) return false;
+  const startLine = Number(start);
+  const endLine = end === undefined ? startLine : Number(end);
+  return !isValidLineRange(startLine, endLine);
 }
 
 /**

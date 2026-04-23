@@ -6,24 +6,14 @@
  * (`broken-citation` with span suffixes and `malformed-claim-citation`) as
  * well as backward-compat scenarios where no new findings should appear.
  *
- * All tests depend on `dist/cli.js` built by the `beforeAll` step.
+ * dist/cli.js is built once via the vitest globalSetup in test/global-setup.ts.
  */
 
-import { describe, it, expect, beforeAll } from "vitest";
-import { execFile } from "child_process";
-import { promisify } from "util";
+import { describe, it, expect } from "vitest";
 import path from "path";
 import { mkdir, rm, writeFile } from "fs/promises";
 import { tmpdir } from "os";
-
-const exec = promisify(execFile);
-const CLI = path.resolve("dist/cli.js");
-
-/** Strip ANSI escape codes so plain-text assertions work on colored output. */
-function stripAnsi(text: string): string {
-  // eslint-disable-next-line no-control-regex
-  return text.replace(/\x1b\[[0-9;]*m/g, "");
-}
+import { exec, CLI, stripAnsi } from "./fixtures/cli-runner.js";
 
 /** Set up a minimal llmwiki project root with wiki/concepts, wiki/queries, sources. */
 async function createWikiRoot(suffix: string): Promise<string> {
@@ -56,10 +46,6 @@ async function runLint(cwd: string): Promise<{ stdout: string; exitCode: number 
 }
 
 describe("CLI integration — claim-level provenance lint rules", () => {
-  beforeAll(async () => {
-    await exec("npx", ["tsup"], { cwd: path.resolve(".") });
-  }, 60_000);
-
   it("reports broken-citation for an unresolved span reference", async () => {
     const root = await createWikiRoot("broken-span");
     try {

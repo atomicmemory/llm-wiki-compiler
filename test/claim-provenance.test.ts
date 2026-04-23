@@ -109,12 +109,51 @@ describe("isMalformedCitationEntry", () => {
     expect(isMalformedCitationEntry("file.md#L1-L3")).toBe(false);
   });
 
+  it("accepts single-line span (start === end)", () => {
+    expect(isMalformedCitationEntry("file.md:1-1")).toBe(false);
+  });
+
+  it("accepts multi-line span", () => {
+    expect(isMalformedCitationEntry("file.md:1-5")).toBe(false);
+  });
+
   it("rejects non-numeric line ranges", () => {
     expect(isMalformedCitationEntry("file.md:abc")).toBe(true);
   });
 
   it("rejects half-baked hash forms", () => {
     expect(isMalformedCitationEntry("file.md#X9")).toBe(true);
+  });
+
+  it("rejects line 0 in colon form (lines are 1-indexed)", () => {
+    expect(isMalformedCitationEntry("file.md:0-3")).toBe(true);
+  });
+
+  it("rejects end before start in colon form", () => {
+    expect(isMalformedCitationEntry("file.md:5-3")).toBe(true);
+  });
+
+  it("rejects line 0 in hash form", () => {
+    expect(isMalformedCitationEntry("file.md#L0-L3")).toBe(true);
+  });
+});
+
+describe("extractClaimCitations with invalid line ranges", () => {
+  it("drops a marker whose only entry has line 0", () => {
+    // Invalid entries produce no spans, so the citation is not included in results.
+    // The linter's checkMalformedClaimCitations flags these independently.
+    const citations = extractClaimCitations("A claim. ^[file.md:0-3]");
+    expect(citations).toHaveLength(0);
+  });
+
+  it("drops a marker whose only entry has end before start", () => {
+    const citations = extractClaimCitations("A claim. ^[file.md:5-3]");
+    expect(citations).toHaveLength(0);
+  });
+
+  it("drops a marker whose only entry has hash-form line 0", () => {
+    const citations = extractClaimCitations("A claim. ^[file.md#L0-L3]");
+    expect(citations).toHaveLength(0);
   });
 });
 
@@ -184,5 +223,38 @@ describe("checkMalformedClaimCitations", () => {
     expect(results).toHaveLength(1);
     expect(results[0].rule).toBe("malformed-claim-citation");
     expect(results[0].severity).toBe("error");
+  });
+
+  it("flags line-0 start in colon form as malformed", async () => {
+    await writeConcept(
+      "line-zero",
+      "---\ntitle: LZ\n---\nClaim. ^[paper.md:0-3]",
+    );
+
+    const results = await checkMalformedClaimCitations(tmpDir);
+    expect(results).toHaveLength(1);
+    expect(results[0].rule).toBe("malformed-claim-citation");
+  });
+
+  it("flags reversed range (end before start) as malformed", async () => {
+    await writeConcept(
+      "reversed",
+      "---\ntitle: Rev\n---\nClaim. ^[paper.md:5-3]",
+    );
+
+    const results = await checkMalformedClaimCitations(tmpDir);
+    expect(results).toHaveLength(1);
+    expect(results[0].rule).toBe("malformed-claim-citation");
+  });
+
+  it("flags line-0 in hash form as malformed", async () => {
+    await writeConcept(
+      "hash-zero",
+      "---\ntitle: HZ\n---\nClaim. ^[paper.md#L0-L3]",
+    );
+
+    const results = await checkMalformedClaimCitations(tmpDir);
+    expect(results).toHaveLength(1);
+    expect(results[0].rule).toBe("malformed-claim-citation");
   });
 });
