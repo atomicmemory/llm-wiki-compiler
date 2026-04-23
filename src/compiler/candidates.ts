@@ -22,7 +22,7 @@ import {
   CANDIDATES_DIR,
   CANDIDATES_ARCHIVE_DIR,
 } from "../utils/constants.js";
-import type { ReviewCandidate } from "../utils/types.js";
+import type { ReviewCandidate, SourceState } from "../utils/types.js";
 
 /** Length (bytes) of the random suffix appended to candidate ids. */
 const ID_SUFFIX_BYTES = 4;
@@ -37,6 +37,12 @@ interface CandidateDraft {
   summary: string;
   sources: string[];
   body: string;
+  /**
+   * Per-source state entries to persist into `.llmwiki/state.json` when this
+   * candidate is approved. Keyed by source filename. Optional so callers that
+   * never need incremental tracking (legacy / tests) can omit it.
+   */
+  sourceStates?: Record<string, SourceState>;
 }
 
 /** Build a deterministic-but-unique id from a slug and a short random suffix. */
@@ -74,6 +80,7 @@ export async function writeCandidate(
     sources: draft.sources,
     body: draft.body,
     generatedAt: new Date().toISOString(),
+    ...(draft.sourceStates ? { sourceStates: draft.sourceStates } : {}),
   };
 
   await atomicWrite(candidatePath(root, candidate.id), JSON.stringify(candidate, null, 2));
@@ -153,13 +160,15 @@ export async function listCandidates(root: string): Promise<ReviewCandidate[]> {
   return candidates;
 }
 
-/** Count pending candidates without parsing each file's body. */
+/**
+ * Count pending candidates using the same validity filter as listCandidates,
+ * so consumers (e.g. `wiki_status.pendingCandidates`) never report counts
+ * that disagree with what `review list` actually shows. Malformed JSON files
+ * are skipped here exactly as they are by listCandidates.
+ */
 export async function countCandidates(root: string): Promise<number> {
-  const dir = path.join(root, CANDIDATES_DIR);
-  if (!existsSync(dir)) return 0;
-
-  const entries = await readdir(dir, { withFileTypes: true });
-  return entries.filter((entry) => entry.isFile() && entry.name.endsWith(CANDIDATE_EXT)).length;
+  const candidates = await listCandidates(root);
+  return candidates.length;
 }
 
 /** Remove a pending candidate from disk. Returns false when nothing existed to remove. */

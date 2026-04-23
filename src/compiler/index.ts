@@ -12,6 +12,10 @@ import { readFile } from "fs/promises";
 import path from "path";
 import { readState, updateSourceState } from "../utils/state.js";
 import {
+  buildExtractionSourceStates,
+  pickStatesForSources,
+} from "./source-state.js";
+import {
   atomicWrite,
   safeReadFile,
   validateWikiPage,
@@ -57,6 +61,9 @@ import type {
   SourceState,
   WikiState,
 } from "../utils/types.js";
+
+/** Per-source state snapshots keyed by source filename. */
+type SourceStateMap = Record<string, SourceState>;
 
 /** Empty CompileResult used when no pipeline work runs (e.g. lock contention). */
 function emptyCompileResult(): CompileResult {
@@ -137,12 +144,17 @@ async function generatePagesPhase(
   options: CompileOptions,
 ): Promise<PageGenerationResult> {
   const merged = mergeExtractions(extractions, frozenSlugs);
+  // Build the per-source state snapshot once so each candidate can carry the
+  // exact data needed to mark its sources compiled on approval.
+  const sourceStates = options.review
+    ? await buildExtractionSourceStates(root, extractions)
+    : {};
   const limit = pLimit(COMPILE_CONCURRENCY);
   const errors: string[] = [];
   const candidates: string[] = [];
   const pages = await Promise.all(
     merged.map((entry) => limit(async () => {
-      const result = await generateMergedPage(root, entry, options);
+      const result = await generateMergedPage(root, entry, options, sourceStates);
       if (result.error) errors.push(result.error);
       if (result.candidateId) candidates.push(result.candidateId);
       return entry;
@@ -218,9 +230,13 @@ async function runCompilePipeline(
   }
 
   printChangesSummary(changes);
-  if (!options.review) {
-    await markDeletedAsOrphaned(root, buckets.deleted, state);
-  }
+  // Deletion bookkeeping (orphan marking + frozen-slug persistence) runs in
+  // both modes — it tracks deleted sources, not approved pages, so deferring
+  // it to per-approval would leave the wiki in a stale state if no candidate
+  // is ever approved. Source-state persistence for compiled sources, on the
+  // other hand, is review-deferred: those entries land at approve time so
+  // unapproved candidates remain re-detectable on subsequent compiles.
+  await markDeletedAsOrphaned(root, buckets.deleted, state);
 
   const frozenSlugs = findFrozenSlugs(state, changes);
   reportFrozenSlugs(frozenSlugs);
@@ -234,10 +250,12 @@ async function runCompilePipeline(
 
   if (!options.review) {
     await persistExtractionStates(root, extractions);
-    if (frozenSlugs.size > 0) {
-      await orphanUnownedFrozenPages(root, frozenSlugs);
-    }
-    await persistFrozenSlugs(root, frozenSlugs, extractions);
+  }
+  if (frozenSlugs.size > 0) {
+    await orphanUnownedFrozenPages(root, frozenSlugs);
+  }
+  await persistFrozenSlugs(root, frozenSlugs, extractions);
+  if (!options.review) {
     await finalizeWiki(root, generation.pages);
   }
   return summarizeCompile(buckets, generation, extractions, options);
@@ -408,11 +426,12 @@ async function generateMergedPage(
   root: string,
   entry: MergedConcept,
   options: CompileOptions,
+  sourceStates: SourceStateMap,
 ): Promise<MergedPageOutcome> {
   const fullPage = await renderMergedPageContent(root, entry);
 
   if (options.review) {
-    return await persistReviewCandidate(root, entry, fullPage);
+    return await persistReviewCandidate(root, entry, fullPage, sourceStates);
   }
 
   const pagePath = path.join(root, CONCEPTS_DIR, `${entry.slug}.md`);
@@ -425,6 +444,7 @@ async function persistReviewCandidate(
   root: string,
   entry: MergedConcept,
   fullPage: string,
+  sourceStates: SourceStateMap,
 ): Promise<MergedPageOutcome> {
   const candidate: ReviewCandidate = await writeCandidate(root, {
     title: entry.concept.concept,
@@ -432,6 +452,7 @@ async function persistReviewCandidate(
     summary: entry.concept.summary,
     sources: entry.sourceFiles,
     body: fullPage,
+    sourceStates: pickStatesForSources(sourceStates, entry.sourceFiles),
   });
   output.status("?", output.info(`Candidate ready: ${candidate.id} (${entry.slug})`));
   return { candidateId: candidate.id };

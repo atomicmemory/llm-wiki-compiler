@@ -92,6 +92,15 @@ export interface ReviewCandidate {
   body: string;
   /** ISO timestamp recorded when the candidate was generated. */
   generatedAt: string;
+  /**
+   * Per-source incremental-state snapshots captured at compile time.
+   *
+   * Approving the candidate persists these into `.llmwiki/state.json` so the
+   * source files are marked compiled and won't be reprocessed on the next
+   * `compile` run. Without this, approved candidates would silently
+   * regenerate on every subsequent compile.
+   */
+  sourceStates?: Record<string, SourceState>;
 }
 
 /** Structured result returned by the query pipeline. */

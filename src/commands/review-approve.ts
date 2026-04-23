@@ -17,8 +17,10 @@ import { generateIndex } from "../compiler/indexgen.js";
 import { generateMOC } from "../compiler/obsidian.js";
 import { resolveLinks } from "../compiler/resolver.js";
 import { updateEmbeddings } from "../utils/embeddings.js";
+import { updateSourceState } from "../utils/state.js";
 import { CONCEPTS_DIR } from "../utils/constants.js";
 import * as output from "../utils/output.js";
+import type { ReviewCandidate } from "../utils/types.js";
 
 /** Approve a pending candidate by promoting its body into wiki/concepts/. */
 export default async function reviewApproveCommand(id: string): Promise<void> {
@@ -36,9 +38,28 @@ export default async function reviewApproveCommand(id: string): Promise<void> {
   await atomicWrite(pagePath, candidate.body);
   output.status("+", output.success(`Approved → ${output.source(pagePath)}`));
 
+  await persistCandidateSourceStates(root, candidate);
   await refreshWikiAfterApproval(root, candidate.slug);
   await deleteCandidate(root, id);
   output.status("✓", output.dim(`Candidate ${id} cleared.`));
+}
+
+/**
+ * Flush the source-state snapshot stored on the candidate into
+ * `.llmwiki/state.json` so the contributing source files are marked
+ * compiled. Without this, approved candidates would re-appear on the next
+ * `compile` run because the source still looks "new" or "changed" to the
+ * change detector.
+ */
+async function persistCandidateSourceStates(
+  root: string,
+  candidate: ReviewCandidate,
+): Promise<void> {
+  const states = candidate.sourceStates;
+  if (!states) return;
+  for (const [sourceFile, entry] of Object.entries(states)) {
+    await updateSourceState(root, sourceFile, entry);
+  }
 }
 
 /** Refresh interlinks, index, MOC, and embeddings after writing a candidate. */

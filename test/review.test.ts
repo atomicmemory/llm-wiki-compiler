@@ -105,6 +105,22 @@ describe("candidates module", () => {
     expect(await countCandidates(tmpDir)).toBe(2);
   });
 
+  it("countCandidates and listCandidates agree even with malformed JSON files", async () => {
+    await writeCandidate(tmpDir, sampleDraft("good"));
+    // Drop a syntactically-broken candidate file alongside the valid one.
+    const candidatesDir = path.join(tmpDir, CANDIDATES_DIR);
+    await writeFile(
+      path.join(candidatesDir, "broken-candidate.json"),
+      "{ this is not valid json",
+      "utf-8",
+    );
+
+    const listed = await listCandidates(tmpDir);
+    const counted = await countCandidates(tmpDir);
+    expect(counted).toBe(listed.length);
+    expect(counted).toBe(1);
+  });
+
   it("returns null when reading a missing candidate", async () => {
     expect(await readCandidate(tmpDir, "no-such-id")).toBeNull();
   });
@@ -226,5 +242,45 @@ describe("compile --review pipeline integration", () => {
 
     const candidateFiles = await readdir(path.join(tmpDir, CANDIDATES_DIR));
     expect(candidateFiles.filter((f) => f.endsWith(".json"))).toHaveLength(1);
+  });
+
+  /**
+   * End-to-end incremental-state regression test for Finding 1.
+   *
+   * Prior to the fix, `compile --review` skipped state.json writes entirely.
+   * That left every approved source still flagged "new" in change detection,
+   * so the next compile would regenerate the same candidate over and over.
+   * Approving a candidate must persist its source-state snapshot so the
+   * source is treated as "unchanged" on subsequent compiles.
+   */
+  it("does not regenerate a candidate for a source that was approved", async () => {
+    await writeFile(
+      path.join(tmpDir, "sources", "topic.md"),
+      "# Topic\nA brief article about a single topic.",
+    );
+
+    const llm = await import("../src/utils/llm.js");
+    vi.spyOn(llm, "callClaude").mockImplementation(async ({ tools }) => {
+      if (tools && tools.length > 0) {
+        return JSON.stringify({
+          concepts: [
+            { concept: "Topic", summary: "A topic.", is_new: true, tags: [] },
+          ],
+        });
+      }
+      return VALID_BODY;
+    });
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const first = await compileAndReport(tmpDir, { review: true });
+    expect(first.candidates).toHaveLength(1);
+
+    const candidateId = first.candidates![0];
+    await reviewApproveCommand(candidateId);
+
+    const second = await compileAndReport(tmpDir, { review: true });
+    expect(second.candidates ?? []).toHaveLength(0);
+    expect(second.compiled).toBe(0);
+    expect(second.skipped).toBeGreaterThanOrEqual(1);
   });
 });
