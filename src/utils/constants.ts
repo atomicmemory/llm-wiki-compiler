@@ -54,6 +54,12 @@ export const TRANSCRIPT_EXTENSIONS = new Set([".vtt", ".srt", ".txt"]);
 /** Max tokens for image-description completions. */
 export const IMAGE_DESCRIBE_MAX_TOKENS = 2048;
 
+/** Pending review candidates awaiting approval/rejection. */
+export const CANDIDATES_DIR = ".llmwiki/candidates";
+
+/** Rejected review candidates archived for audit (not deleted). */
+export const CANDIDATES_ARCHIVE_DIR = ".llmwiki/candidates/archive";
+
 /** Number of most similar pages to return from embedding-based pre-filter. */
 export const EMBEDDING_TOP_K = 15;
 
