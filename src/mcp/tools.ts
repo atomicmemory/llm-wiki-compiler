@@ -17,6 +17,7 @@ import { generateAnswer, selectPages } from "../commands/query.js";
 import { lint } from "../linter/index.js";
 import { collectPageSummaries, scanWikiPages } from "../compiler/indexgen.js";
 import { detectChanges } from "../compiler/hasher.js";
+import { countCandidates } from "../compiler/candidates.js";
 import { readState } from "../utils/state.js";
 import { safeReadFile, parseFrontmatter } from "../utils/markdown.js";
 import { findRelevantChunks, findRelevantPages } from "../utils/embeddings.js";
@@ -261,6 +262,7 @@ async function collectStatus(root: string): Promise<WikiStatus> {
   const state = await readState(root);
   const changes = await detectChanges(root, state);
   const orphans = await findOrphanedSlugs(root);
+  const pendingCandidates = await countCandidates(root);
   const compileTimes = Object.values(state.sources).map((s) => s.compiledAt);
   const lastCompile = compileTimes.length > 0
     ? compileTimes.sort().slice(-1)[0]
@@ -271,6 +273,7 @@ async function collectStatus(root: string): Promise<WikiStatus> {
     sources: Object.keys(state.sources).length,
     lastCompiledAt: lastCompile,
     orphanedPages: orphans,
+    pendingCandidates,
     pendingChanges: changes
       .filter((c) => c.status !== "unchanged")
       .map((c) => ({ file: c.file, status: c.status })),
@@ -282,6 +285,8 @@ interface WikiStatus {
   sources: number;
   lastCompiledAt: string | null;
   orphanedPages: string[];
+  /** Number of compile candidates awaiting human review. */
+  pendingCandidates: number;
   pendingChanges: Array<{ file: string; status: string }>;
 }
 

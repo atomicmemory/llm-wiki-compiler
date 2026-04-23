@@ -60,6 +60,47 @@ export interface CompileResult {
   concepts: string[];
   pages: string[];
   errors: string[];
+  /** Candidate IDs created when the pipeline runs in --review mode. */
+  candidates?: string[];
+}
+
+/** Optional behaviour controls for the compile pipeline. */
+export interface CompileOptions {
+  /**
+   * Write generated pages as candidates under .llmwiki/candidates/ instead
+   * of mutating wiki/. Reviewers approve/reject via `llmwiki review`.
+   */
+  review?: boolean;
+}
+
+/**
+ * A pending wiki page change awaiting human review. Persisted as JSON under
+ * .llmwiki/candidates/<id>.json when compile is run with --review.
+ */
+export interface ReviewCandidate {
+  /** Stable identifier used by the review CLI commands. */
+  id: string;
+  /** Human-readable concept title. */
+  title: string;
+  /** Filename slug that the page would be written to. */
+  slug: string;
+  /** Short summary copied from the LLM extraction. */
+  summary: string;
+  /** Source filenames that contributed to this candidate. */
+  sources: string[];
+  /** Full page content (frontmatter + body) ready to be written verbatim. */
+  body: string;
+  /** ISO timestamp recorded when the candidate was generated. */
+  generatedAt: string;
+  /**
+   * Per-source incremental-state snapshots captured at compile time.
+   *
+   * Approving the candidate persists these into `.llmwiki/state.json` so the
+   * source files are marked compiled and won't be reprocessed on the next
+   * `compile` run. Without this, approved candidates would silently
+   * regenerate on every subsequent compile.
+   */
+  sourceStates?: Record<string, SourceState>;
 }
 
 /** A single chunk citation surfaced as part of a query result. */
