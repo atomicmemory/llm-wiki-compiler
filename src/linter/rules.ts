@@ -313,7 +313,21 @@ function countUncitedProseParagraphs(body: string): number {
   return count;
 }
 
-/** Find ^[filename.md] citations referencing source files that don't exist. */
+/**
+ * Expand a captured citation string into individual source filenames.
+ * A multi-source citation like "a.md, b.md" is split on commas so each
+ * filename can be checked independently. Single-source citations are
+ * returned as a one-element array unchanged.
+ */
+function splitCitationFilenames(captured: string): string[] {
+  return captured.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
+/** Find ^[filename.md] citations referencing source files that don't exist.
+ * Handles both single-source ^[file.md] and multi-source ^[a.md, b.md] forms.
+ * Each filename in a multi-source citation is checked independently — only the
+ * missing ones are reported, not the entire captured text as one filename.
+ */
 export async function checkBrokenCitations(root: string): Promise<LintResult[]> {
   const pages = await collectAllPages(root);
   const sourcesDir = path.join(root, SOURCES_DIR);
@@ -321,15 +335,17 @@ export async function checkBrokenCitations(root: string): Promise<LintResult[]> 
 
   for (const page of pages) {
     for (const { captured, line } of findMatchesInContent(page.content, CITATION_PATTERN)) {
-      const citedPath = path.join(sourcesDir, captured);
-      if (!existsSync(citedPath)) {
-        results.push({
-          rule: "broken-citation",
-          severity: "error",
-          file: page.filePath,
-          message: `Broken citation ^[${captured}] — source file not found`,
-          line,
-        });
+      for (const filename of splitCitationFilenames(captured)) {
+        const citedPath = path.join(sourcesDir, filename);
+        if (!existsSync(citedPath)) {
+          results.push({
+            rule: "broken-citation",
+            severity: "error",
+            file: page.filePath,
+            message: `Broken citation ^[${filename}] — source file not found`,
+            line,
+          });
+        }
       }
     }
   }

@@ -19,6 +19,7 @@ import {
   checkInferredWithoutCitations,
 } from "../src/linter/rules.js";
 import { parseConcepts } from "../src/compiler/prompts.js";
+import { reconcileConceptMetadata } from "../src/compiler/index.js";
 import { makeLintTempRoot } from "./fixtures/lint-temp-root.js";
 
 let tmpDir: string;
@@ -200,5 +201,58 @@ describe("checkInferredWithoutCitations", () => {
     await writeConcept("good", `---\ntitle: Good\n---\n${body}`);
     const results = await checkInferredWithoutCitations(tmpDir);
     expect(results).toHaveLength(0);
+  });
+});
+
+describe("reconcileConceptMetadata", () => {
+  it("takes the minimum confidence across two concepts", () => {
+    const first = { concept: "X", summary: "s", is_new: true, confidence: 0.8 };
+    const second = { concept: "X", summary: "s", is_new: false, confidence: 0.3 };
+    const result = reconcileConceptMetadata(first, second);
+    expect(result.confidence).toBe(0.3);
+  });
+
+  it("sets provenanceState to 'merged' regardless of input states", () => {
+    const first = { concept: "X", summary: "s", is_new: true, provenanceState: "extracted" as const };
+    const second = { concept: "X", summary: "s", is_new: false, provenanceState: "inferred" as const };
+    const result = reconcileConceptMetadata(first, second);
+    expect(result.provenanceState).toBe("merged");
+  });
+
+  it("unions contradictedBy entries, deduplicating by slug", () => {
+    const first = {
+      concept: "X", summary: "s", is_new: true,
+      contradictedBy: [{ slug: "a", reason: "r1" }, { slug: "b" }],
+    };
+    const second = {
+      concept: "X", summary: "s", is_new: false,
+      contradictedBy: [{ slug: "b", reason: "dup" }, { slug: "c" }],
+    };
+    const result = reconcileConceptMetadata(first, second);
+    const slugs = result.contradictedBy?.map((r) => r.slug);
+    expect(slugs).toEqual(["a", "b", "c"]);
+    expect(result.contradictedBy).toHaveLength(3);
+  });
+
+  it("takes the maximum inferredParagraphs across two concepts", () => {
+    const first = { concept: "X", summary: "s", is_new: true, inferredParagraphs: 1 };
+    const second = { concept: "X", summary: "s", is_new: false, inferredParagraphs: 4 };
+    const result = reconcileConceptMetadata(first, second);
+    expect(result.inferredParagraphs).toBe(4);
+  });
+
+  it("inherits incoming confidence when existing has none", () => {
+    const first = { concept: "X", summary: "s", is_new: true };
+    const second = { concept: "X", summary: "s", is_new: false, confidence: 0.5 };
+    const result = reconcileConceptMetadata(first, second);
+    expect(result.confidence).toBe(0.5);
+  });
+
+  it("preserves concept title and summary from the first entry", () => {
+    const first = { concept: "X", summary: "First summary", is_new: true };
+    const second = { concept: "X", summary: "Second summary", is_new: false };
+    const result = reconcileConceptMetadata(first, second);
+    expect(result.concept).toBe("X");
+    expect(result.summary).toBe("First summary");
   });
 });
