@@ -34,7 +34,7 @@ describe("resolveLinks", () => {
 
     await resolveLinks(tmpDir, ["alpha"], []);
     const content = await readPage("alpha");
-    expect(content).toContain("[[Beta Concept]]");
+    expect(content).toContain("[[beta|Beta Concept]]");
   });
 
   it("matches case-insensitively", async () => {
@@ -43,7 +43,7 @@ describe("resolveLinks", () => {
 
     await resolveLinks(tmpDir, ["alpha"], []);
     const content = await readPage("alpha");
-    expect(content).toContain("[[Beta Concept]]");
+    expect(content).toContain("[[beta|Beta Concept]]");
   });
 
   it("does not double-link already linked text", async () => {
@@ -63,7 +63,7 @@ describe("resolveLinks", () => {
 
     await resolveLinks(tmpDir, ["alpha"], []);
     const content = await readPage("alpha");
-    expect(content).not.toContain("[[Beta]]max");
+    expect(content).not.toContain("[[beta|Beta]]max");
     expect(content).toContain("Betamax");
   });
 
@@ -86,6 +86,6 @@ describe("resolveLinks", () => {
 
     await resolveLinks(tmpDir, ["new-concept"], ["new-concept"]);
     const content = await readPage("existing");
-    expect(content).toContain("[[New Concept]]");
+    expect(content).toContain("[[new-concept|New Concept]]");
   });
 });

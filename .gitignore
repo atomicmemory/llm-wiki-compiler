@@ -11,4 +11,3 @@ localdocs/
 .fallow/
 .worktrees/
 .sisyphus/
-*.yaml
