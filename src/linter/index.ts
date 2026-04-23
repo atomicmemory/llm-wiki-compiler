@@ -15,6 +15,9 @@ import {
   checkEmptyPages,
   checkBrokenCitations,
   checkMalformedClaimCitations,
+  checkLowConfidencePages,
+  checkContradictedPages,
+  checkInferredWithoutCitations,
 } from "./rules.js";
 
 /** All lint rules to execute during a lint pass. */
@@ -26,6 +29,9 @@ const ALL_RULES: LintRule[] = [
   checkEmptyPages,
   checkBrokenCitations,
   checkMalformedClaimCitations,
+  checkLowConfidencePages,
+  checkContradictedPages,
+  checkInferredWithoutCitations,
 ];
 
 /**

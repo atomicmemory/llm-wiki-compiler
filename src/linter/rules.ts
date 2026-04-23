@@ -13,9 +13,16 @@ import path from "path";
 import {
   isMalformedCitationEntry,
   parseFrontmatter,
+  parseProvenanceMetadata,
   slugify,
 } from "../utils/markdown.js";
-import { CONCEPTS_DIR, QUERIES_DIR, SOURCES_DIR } from "../utils/constants.js";
+import {
+  CONCEPTS_DIR,
+  LOW_CONFIDENCE_THRESHOLD,
+  MAX_INFERRED_PARAGRAPHS_WITHOUT_CITATIONS,
+  QUERIES_DIR,
+  SOURCES_DIR,
+} from "../utils/constants.js";
 import type { LintResult } from "./types.js";
 
 /** Minimum body length (in characters) for a page to be considered non-empty. */
@@ -230,10 +237,103 @@ function stripSpanSuffix(entry: string): string {
 }
 
 /**
+ * Flag pages whose frontmatter declares confidence below the threshold.
+ * Pages without a confidence field are silently skipped to preserve
+ * backward-compatibility with pre-existing wikis.
+ */
+export async function checkLowConfidencePages(root: string): Promise<LintResult[]> {
+  const pages = await collectAllPages(root);
+  const results: LintResult[] = [];
+
+  for (const page of pages) {
+    const { meta } = parseFrontmatter(page.content);
+    const { confidence } = parseProvenanceMetadata(meta);
+    if (confidence === undefined || confidence >= LOW_CONFIDENCE_THRESHOLD) continue;
+    results.push({
+      rule: "low-confidence",
+      severity: "warning",
+      file: page.filePath,
+      message: `Page confidence ${confidence.toFixed(2)} is below ${LOW_CONFIDENCE_THRESHOLD}`,
+    });
+  }
+
+  return results;
+}
+
+/** Flag pages whose frontmatter records contradictions with other pages. */
+export async function checkContradictedPages(root: string): Promise<LintResult[]> {
+  const pages = await collectAllPages(root);
+  const results: LintResult[] = [];
+
+  for (const page of pages) {
+    const { meta } = parseFrontmatter(page.content);
+    const { contradictedBy } = parseProvenanceMetadata(meta);
+    if (!contradictedBy || contradictedBy.length === 0) continue;
+    const slugs = contradictedBy.map((r) => r.slug).join(", ");
+    results.push({
+      rule: "contradicted-page",
+      severity: "warning",
+      file: page.filePath,
+      message: `Page contradicts: ${slugs}`,
+    });
+  }
+
+  return results;
+}
+
+/**
+ * Flag pages with too many inferred paragraphs unsupported by direct citations.
+ * Uses the metadata-reported count when present and falls back to counting
+ * uncited prose paragraphs in the body.
+ */
+export async function checkInferredWithoutCitations(root: string): Promise<LintResult[]> {
+  const pages = await collectAllPages(root);
+  const results: LintResult[] = [];
+
+  for (const page of pages) {
+    const { meta, body } = parseFrontmatter(page.content);
+    const provenance = parseProvenanceMetadata(meta);
+    const inferred = provenance.inferredParagraphs ?? countUncitedProseParagraphs(body);
+    if (inferred <= MAX_INFERRED_PARAGRAPHS_WITHOUT_CITATIONS) continue;
+    results.push({
+      rule: "excess-inferred-paragraphs",
+      severity: "warning",
+      file: page.filePath,
+      message: `Page has ${inferred} inferred paragraphs without citations (max ${MAX_INFERRED_PARAGRAPHS_WITHOUT_CITATIONS})`,
+    });
+  }
+
+  return results;
+}
+
+/** Match a paragraph that looks like prose (not a heading, list, or code block). */
+const PROSE_PARAGRAPH_LEAD = /^[A-Za-z]/;
+
+/** Count prose paragraphs in a body that lack a ^[citation] marker. */
+function countUncitedProseParagraphs(body: string): number {
+  const paragraphs = body.split(/\n\s*\n/);
+  let count = 0;
+  for (const block of paragraphs) {
+    const trimmed = block.trim();
+    if (trimmed.length === 0) continue;
+    if (!PROSE_PARAGRAPH_LEAD.test(trimmed)) continue;
+    if (CITATION_PATTERN.test(trimmed)) {
+      CITATION_PATTERN.lastIndex = 0;
+      continue;
+    }
+    CITATION_PATTERN.lastIndex = 0;
+    count += 1;
+  }
+  return count;
+}
+
+/**
  * Find ^[filename.md] citations referencing source files that don't exist.
- * Accepts both paragraph form and the claim-level extension; for the latter,
- * only the filename portion is checked against the sources directory because
- * line ranges have no on-disk representation to validate.
+ * Handles both single-source ^[file.md] and multi-source ^[a.md, b.md] forms,
+ * plus the claim-level extension `^[file.md:42-58]` / `^[file.md#L42-L58]` —
+ * line/range suffixes are stripped before checking the filename against the
+ * sources directory because line ranges have no on-disk representation to
+ * validate.
  */
 export async function checkBrokenCitations(root: string): Promise<LintResult[]> {
   const pages = await collectAllPages(root);
@@ -267,7 +367,7 @@ function collectBrokenForMarker(
       rule: "broken-citation",
       severity: "error",
       file: pageFile,
-      message: `Broken citation ^[${captured}] — source file not found`,
+      message: `Broken citation ^[${filename}] — source file not found`,
       line,
     });
   }

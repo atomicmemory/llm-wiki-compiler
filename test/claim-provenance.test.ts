@@ -158,7 +158,7 @@ describe("checkBrokenCitations with claim-level spans", () => {
     const results = await checkBrokenCitations(tmpDir);
     expect(results).toHaveLength(1);
     expect(results[0].rule).toBe("broken-citation");
-    expect(results[0].message).toContain("ghost.md:1-2");
+    expect(results[0].message).toContain("ghost.md");
   });
 });
 
