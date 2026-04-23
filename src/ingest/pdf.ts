@@ -34,10 +34,11 @@ export default async function ingestPdf(filePath: string): Promise<IngestedSourc
   const parser = new PDFParse({ data: new Uint8Array(buffer) });
 
   try {
-    const [textResult, infoResult] = await Promise.all([
-      parser.getText(),
-      parser.getInfo(),
-    ]);
+    // Sequential calls are required: pdfjs-dist's LoopbackPort.postMessage
+    // uses structuredClone internally; concurrent calls cause a DataCloneError
+    // when the port tries to transfer the same underlying state simultaneously.
+    const textResult = await parser.getText();
+    const infoResult = await parser.getInfo();
 
     const title = resolveTitle(filePath, infoResult.info);
     const content = textResult.text.trim();
