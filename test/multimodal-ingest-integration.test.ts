@@ -22,7 +22,7 @@
  * All fixture files are written to a tmp directory and cleaned up after each test.
  */
 
-import { describe, it, expect, beforeAll, afterEach } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import path from "path";
@@ -158,9 +158,7 @@ async function assertExtensionRouting(
 }
 
 describe("multimodal ingest CLI integration", () => {
-  beforeAll(async () => {
-    await exec("npx", ["tsup"], { cwd: path.resolve(".") });
-  }, 30_000);
+  // dist/cli.js is built once via vitest globalSetup (test/global-setup.ts)
 
   it("ingest --help shows help and exits 0", async () => {
     const { stdout } = await exec("node", [CLI, "ingest", "--help"]);
