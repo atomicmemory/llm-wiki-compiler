@@ -86,9 +86,9 @@ describe("generateMOC", () => {
 
     expect(moc).toContain("## ml");
     expect(moc).toContain("## databases");
-    expect(moc).toContain("[[Alpha]]");
-    expect(moc).toContain("[[Beta]]");
-    expect(moc).toContain("[[Gamma]]");
+    expect(moc).toContain("[[alpha|Alpha]]");
+    expect(moc).toContain("[[beta|Beta]]");
+    expect(moc).toContain("[[gamma|Gamma]]");
   });
 
   it("includes uncategorized section for tagless pages", async () => {
@@ -100,7 +100,7 @@ describe("generateMOC", () => {
     const moc = await readFile(path.join(root, "wiki/MOC.md"), "utf-8");
 
     expect(moc).toContain("## Uncategorized");
-    expect(moc).toContain("[[Beta]]");
+    expect(moc).toContain("[[beta|Beta]]");
   });
 
   it("creates valid markdown output", async () => {
@@ -111,7 +111,7 @@ describe("generateMOC", () => {
     const moc = await readFile(path.join(root, "wiki/MOC.md"), "utf-8");
 
     expect(moc).toMatch(/^# Map of Content/);
-    expect(moc).toContain("- [[Alpha]]");
+    expect(moc).toContain("- [[alpha|Alpha]]");
   });
 
   it("handles empty concepts directory", async () => {
@@ -129,7 +129,7 @@ describe("generateMOC", () => {
     await generateMOC(root);
     const moc = await readFile(path.join(root, "wiki/MOC.md"), "utf-8");
 
-    expect(moc).toContain("[[Alive]]");
-    expect(moc).not.toContain("[[Dead]]");
+    expect(moc).toContain("[[alive|Alive]]");
+    expect(moc).not.toContain("[[dead|Dead]]");
   });
 });

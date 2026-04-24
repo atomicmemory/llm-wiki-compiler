@@ -2,8 +2,9 @@
  * Interlink resolution for wiki pages.
  *
  * Rule-based (not LLM-based) pass that scans wiki pages for concept title
- * mentions and wraps them in [[wikilinks]]. Obsidian-compatible format using
- * display titles, not slugs.
+ * mentions and wraps them in [[slug|Title]] wikilinks. The piped alias form
+ * keeps Obsidian link resolution stable when a page's filename (slug) differs
+ * from its display title.
  *
  * Complexity: O(changed * total) per incremental compile.
  * Full recompile degrades to O(total^2).
@@ -113,7 +114,7 @@ function addWikilinks(body: string, titles: PageInfo[], selfTitle: string): stri
     // Process matches in reverse to preserve positions
     for (const m of matches.reverse()) {
       if (!isLinkablePosition(result, m.start, m.end)) continue;
-      result = result.slice(0, m.start) + `[[${page.title}]]` + result.slice(m.end);
+      result = result.slice(0, m.start) + `[[${page.slug}|${page.title}]]` + result.slice(m.end);
     }
   }
 

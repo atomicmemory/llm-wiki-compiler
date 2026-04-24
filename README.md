@@ -158,9 +158,14 @@ Pages include source attribution in frontmatter. Paragraphs are annotated with `
 |---------|-------------|
 | `llmwiki ingest <url\|file>` | Fetch a URL or copy a local file into `sources/` |
 | `llmwiki compile` | Incremental compile: extract concepts, generate wiki pages |
+| `llmwiki compile --review` | Write candidate pages to `.llmwiki/candidates/` instead of `wiki/` so you can review before they land |
+| `llmwiki review list` | List pending candidate pages |
+| `llmwiki review show <id>` | Print a candidate's title, summary, and body |
+| `llmwiki review approve <id>` | Promote a candidate into `wiki/` and refresh index/MOC/embeddings |
+| `llmwiki review reject <id>` | Archive a candidate without touching `wiki/` |
 | `llmwiki query "question"` | Ask questions against your compiled wiki |
 | `llmwiki query "question" --save` | Answer and save the result as a wiki page |
-| `llmwiki lint` | Check wiki quality (broken links, orphans, empty pages, etc.) |
+| `llmwiki lint` | Check wiki quality (broken links, orphans, empty pages, low confidence, contradictions, etc.) |
 | `llmwiki watch` | Auto-recompile when `sources/` changes |
 | `llmwiki serve [--root <dir>]` | Start an MCP server exposing wiki tools to AI agents |
 
@@ -168,12 +173,60 @@ Pages include source attribution in frontmatter. Paragraphs are annotated with `
 
 ```
 wiki/
-  concepts/     one .md file per concept, with YAML frontmatter
-  queries/      saved query answers, included in index and retrieval
-  index.md      auto-generated table of contents
+  concepts/         one .md file per concept, with YAML frontmatter
+  queries/          saved query answers, included in index and retrieval
+  index.md          auto-generated table of contents
+.llmwiki/
+  candidates/       pending review candidates from `compile --review`
+  candidates/archive/  rejected candidates kept for audit
 ```
 
 Obsidian-compatible. `[[wikilinks]]` resolve to concept titles.
+
+## Review queue
+
+By default, `compile` writes pages directly to `wiki/`. Add `--review` to write candidate JSON records to `.llmwiki/candidates/` instead, so you can inspect each generated page before it lands.
+
+```bash
+llmwiki compile --review     # produces candidates, leaves wiki/ untouched
+llmwiki review list          # see what's pending
+llmwiki review show <id>     # inspect a single candidate
+llmwiki review approve <id>  # write into wiki/ + refresh index/MOC/embeddings
+llmwiki review reject <id>   # archive to .llmwiki/candidates/archive/
+```
+
+A few things to know:
+
+- **Approve and reject acquire `.llmwiki/lock`** so they serialize cleanly against each other and against any concurrent `compile`.
+- **Source state is deferred per-source.** When one source produces multiple candidates, the source isn't marked compiled until the last candidate is approved — so unresolved siblings stay re-detectable on the next `compile --review`.
+- **Deletion bookkeeping is deferred.** `compile --review` does not orphan-mark deleted sources; the next non-review `compile` does that. The `--review` help text advertises this.
+- MCP `wiki_status` exposes `pendingCandidates` so agents can see the queue depth.
+
+## Page metadata
+
+Compiled pages can carry epistemic metadata in frontmatter so consumers know how trustworthy each page is. All fields are optional and existing pages without them continue to work.
+
+```yaml
+---
+title: Knowledge Compilation
+summary: Techniques for converting knowledge representations...
+sources:
+  - knowledge-compilation.md
+confidence: 0.82           # 0–1, LLM-reported confidence in the synthesized page
+provenanceState: merged    # extracted | merged | inferred | ambiguous
+contradictedBy:
+  - slug: probabilistic-reasoning
+inferredParagraphs: 1      # paragraphs the LLM marked as inferred (vs cited)
+---
+```
+
+When multiple sources merge into one slug, metadata is reconciled: `min` confidence, `provenanceState = 'merged'`, union of `contradictedBy` (deduped by slug), `max` `inferredParagraphs`.
+
+`llmwiki lint` adds three rules that surface this metadata:
+
+- `low-confidence` — flags pages with `confidence` below a threshold
+- `contradicted-page` — flags pages with non-empty `contradictedBy`
+- `excess-inferred-paragraphs` — flags pages with too many inferred paragraphs without citations
 
 ## Demo
 
@@ -269,6 +322,11 @@ Karpathy describes an abstract pattern for turning raw data into compiled knowle
 
 ## Roadmap
 
+Shipped in 0.3.0:
+
+- ✅ Candidate review queue (approve compile output before pages are written)
+- ✅ Confidence and contradiction metadata on compiled pages
+
 Shipped in 0.2.0:
 
 - ✅ Better provenance (paragraph-level source attribution)
@@ -280,15 +338,14 @@ Shipped in 0.2.0:
 
 Next up:
 
-- Candidate review queue (approve compile output before pages are written)
-- Confidence and contradiction metadata on compiled pages
 - Claim-level provenance with source ranges
+- First-class schema layer with typed page kinds (`concept`, `entity`, `comparison`, `overview`)
 - Multimodal ingest (images, PDFs, transcripts)
 - Chunked retrieval with reranking
 - Export bundle (`llms.txt`, JSON, JSON-LD, GraphML, Marp)
 - Session-history adapters (Claude, Codex, Cursor exports)
 
-If you like ambitious problems: **claim-level provenance**, **chunked retrieval with reranking**, and **confidence/contradiction metadata** are the meatiest. Open an issue to claim one or kick off a design discussion.
+If you like ambitious problems: **schema layer + typed page kinds**, **claim-level provenance**, and **chunked retrieval with reranking** are the meatiest. Open an issue to claim one or kick off a design discussion.
 
 ## Requirements
 

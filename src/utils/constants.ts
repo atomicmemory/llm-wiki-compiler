@@ -69,6 +69,10 @@ export const CHUNK_MAX_CHARS = 1_400;
 /** Minimum standalone chunk size; smaller trailing fragments are merged back. */
 export const CHUNK_MIN_CHARS = 200;
 
+/** Provenance metadata thresholds used by lint rules. */
+export const LOW_CONFIDENCE_THRESHOLD = 0.5;
+export const MAX_INFERRED_PARAGRAPHS_WITHOUT_CITATIONS = 2;
+
 /** Embedding model to use per provider. */
 export const EMBEDDING_MODELS: Record<string, string> = {
   anthropic: "voyage-3-lite",

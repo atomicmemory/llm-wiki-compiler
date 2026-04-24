@@ -374,10 +374,60 @@ interface MergedConcept {
 }
 
 /**
+ * Reconcile metadata from a later-extracted concept into an existing merged entry.
+ * Called when multiple sources contribute the same slug — produces the most
+ * pessimistic aggregate view of confidence, provenance, and contradictions.
+ *
+ * Rules:
+ * - confidence: min (most pessimistic value wins)
+ * - provenanceState: always 'merged' once two sources are involved
+ * - contradictedBy: union by slug (deduplicating on slug identity)
+ * - inferredParagraphs: max (any source claiming inference wins)
+ */
+export function reconcileConceptMetadata(
+  existing: ExtractedConcept,
+  incoming: ExtractedConcept,
+): ExtractedConcept {
+  const reconciled = { ...existing };
+
+  // Minimum confidence — the weaker source's score governs the whole page.
+  if (typeof incoming.confidence === "number") {
+    reconciled.confidence = typeof existing.confidence === "number"
+      ? Math.min(existing.confidence, incoming.confidence)
+      : incoming.confidence;
+  }
+
+  // Merged state is the canonical answer when multiple sources contribute.
+  reconciled.provenanceState = "merged";
+
+  // Union contradictedBy entries, deduplicating by slug.
+  const refs = [...(existing.contradictedBy ?? [])];
+  const seenSlugs = new Set(refs.map((r) => r.slug));
+  for (const ref of incoming.contradictedBy ?? []) {
+    if (!seenSlugs.has(ref.slug)) {
+      refs.push(ref);
+      seenSlugs.add(ref.slug);
+    }
+  }
+  reconciled.contradictedBy = refs.length > 0 ? refs : undefined;
+
+  // Max inferredParagraphs — any source flagging inference raises the count.
+  if (typeof incoming.inferredParagraphs === "number") {
+    reconciled.inferredParagraphs = typeof existing.inferredParagraphs === "number"
+      ? Math.max(existing.inferredParagraphs, incoming.inferredParagraphs)
+      : incoming.inferredParagraphs;
+  }
+
+  return reconciled;
+}
+
+/**
  * Merge extractions so each concept slug maps to ALL contributing sources.
  * When sources A and B both extract concept X, the LLM receives combined
  * content from both sources, producing a single page that reflects all
  * contributing material rather than just the last source processed.
+ * Metadata is reconciled across all contributing concepts via
+ * reconcileConceptMetadata so contradictions from later sources are not lost.
  */
 function mergeExtractions(
   extractions: ExtractionResult[],
@@ -394,6 +444,7 @@ function mergeExtractions(
 
       const existing = bySlug.get(slug);
       if (existing) {
+        existing.concept = reconcileConceptMetadata(existing.concept, concept);
         existing.sourceFiles.push(result.sourceFile);
         existing.combinedContent += `\n\n--- SOURCE: ${result.sourceFile} ---\n\n${result.sourceContent}`;
       } else {
