@@ -10,7 +10,13 @@
 import { readdir, readFile } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
-import { parseFrontmatter, parseProvenanceMetadata, slugify } from "../utils/markdown.js";
+import {
+  isMalformedCitationEntry,
+  parseFrontmatter,
+  parseProvenanceMetadata,
+  safeReadFile,
+  slugify,
+} from "../utils/markdown.js";
 import {
   CONCEPTS_DIR,
   LOW_CONFIDENCE_THRESHOLD,
@@ -227,6 +233,15 @@ export async function checkEmptyPages(root: string): Promise<LintResult[]> {
   return results;
 }
 
+/** Strip an optional `:start-end` or `#Lstart-Lend` span suffix from a citation entry. */
+function stripSpanSuffix(entry: string): string {
+  const colonIdx = entry.indexOf(":");
+  const hashIdx = entry.indexOf("#");
+  const cuts = [colonIdx, hashIdx].filter((i) => i >= 0);
+  if (cuts.length === 0) return entry;
+  return entry.slice(0, Math.min(...cuts));
+}
+
 /**
  * Flag pages whose frontmatter declares confidence below the threshold.
  * Pages without a confidence field are silently skipped to preserve
@@ -318,14 +333,16 @@ function countUncitedProseParagraphs(body: string): number {
   return count;
 }
 
-/**
- * Expand a captured citation string into individual source filenames.
- * A multi-source citation like "a.md, b.md" is split on commas so each
- * filename can be checked independently. Single-source citations are
- * returned as a one-element array unchanged.
- */
-function splitCitationFilenames(captured: string): string[] {
-  return captured.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+/** Regex matching the `:start-end` span suffix on a citation entry. */
+const COLON_SPAN_PATTERN = /^[^:#]+:(\d+)(?:-(\d+))?$/;
+
+/** Regex matching the `#Lstart-Lend` span suffix on a citation entry. */
+const HASH_SPAN_PATTERN = /^[^:#]+#L(\d+)(?:-L(\d+))?$/;
+
+/** Parsed line range from a citation entry, or null if no range is present. */
+interface ParsedLineRange {
+  start: number;
+  end: number;
 }
 
 /**
@@ -366,29 +383,124 @@ export async function checkSchemaCrossLinks(
   return results;
 }
 
-/** Find ^[filename.md] citations referencing source files that don't exist.
- * Handles both single-source ^[file.md] and multi-source ^[a.md, b.md] forms.
- * Each filename in a multi-source citation is checked independently — only the
- * missing ones are reported, not the entire captured text as one filename.
+/** Extract the line range from a citation entry string, or return null if there is none. */
+function parseLineRange(entry: string): ParsedLineRange | null {
+  const colonMatch = COLON_SPAN_PATTERN.exec(entry);
+  if (colonMatch) {
+    const start = Number(colonMatch[1]);
+    const end = colonMatch[2] !== undefined ? Number(colonMatch[2]) : start;
+    return { start, end };
+  }
+  const hashMatch = HASH_SPAN_PATTERN.exec(entry);
+  if (hashMatch) {
+    const start = Number(hashMatch[1]);
+    const end = hashMatch[2] !== undefined ? Number(hashMatch[2]) : start;
+    return { start, end };
+  }
+  return null;
+}
+
+/** Count the number of lines in a file's text content. */
+function countLines(content: string): number {
+  if (content.length === 0) return 0;
+  return content.split("\n").length;
+}
+
+/**
+ * Find ^[filename.md] citations referencing source files that don't exist, and
+ * flag claim-level spans whose line ranges exceed the source file's actual length.
+ * Handles both single-source ^[file.md] and multi-source ^[a.md, b.md] forms,
+ * plus the claim-level extension `^[file.md:42-58]` / `^[file.md#L42-L58]`.
+ * Line counts are cached per source file to avoid redundant reads.
  */
 export async function checkBrokenCitations(root: string): Promise<LintResult[]> {
   const pages = await collectAllPages(root);
   const sourcesDir = path.join(root, SOURCES_DIR);
   const results: LintResult[] = [];
+  /** Cache of source filename → line count to avoid repeated reads. */
+  const lineCountCache = new Map<string, number>();
 
   for (const page of pages) {
     for (const { captured, line } of findMatchesInContent(page.content, CITATION_PATTERN)) {
-      for (const filename of splitCitationFilenames(captured)) {
-        const citedPath = path.join(sourcesDir, filename);
-        if (!existsSync(citedPath)) {
-          results.push({
-            rule: "broken-citation",
-            severity: "error",
-            file: page.filePath,
-            message: `Broken citation ^[${filename}] — source file not found`,
-            line,
-          });
-        }
+      await collectBrokenForMarker(captured, line, page.filePath, sourcesDir, lineCountCache, results);
+    }
+  }
+
+  return results;
+}
+
+/** Append broken-citation diagnostics for every entry inside a single ^[...] marker. */
+async function collectBrokenForMarker(
+  captured: string,
+  line: number,
+  pageFile: string,
+  sourcesDir: string,
+  lineCountCache: Map<string, number>,
+  out: LintResult[],
+): Promise<void> {
+  for (const part of captured.split(",")) {
+    const trimmed = part.trim();
+    if (trimmed.length === 0) continue;
+    const filename = stripSpanSuffix(trimmed);
+    const citedPath = path.join(sourcesDir, filename);
+    if (!existsSync(citedPath)) {
+      out.push({
+        rule: "broken-citation",
+        severity: "error",
+        file: pageFile,
+        message: `Broken citation ^[${filename}] — source file not found`,
+        line,
+      });
+      continue;
+    }
+    const range = parseLineRange(trimmed);
+    if (range === null) continue;
+    const lineCount = await resolveLineCount(citedPath, filename, lineCountCache);
+    if (range.end <= lineCount) continue;
+    out.push({
+      rule: "broken-citation",
+      severity: "error",
+      file: pageFile,
+      message: `Claim-level span ^[${trimmed}] is out of bounds (source has only ${lineCount} lines)`,
+      line,
+    });
+  }
+}
+
+/** Return the line count for a source file, reading and caching if necessary. */
+async function resolveLineCount(
+  citedPath: string,
+  filename: string,
+  cache: Map<string, number>,
+): Promise<number> {
+  const cached = cache.get(filename);
+  if (cached !== undefined) return cached;
+  const content = await safeReadFile(citedPath);
+  const lineCount = countLines(content);
+  cache.set(filename, lineCount);
+  return lineCount;
+}
+
+/**
+ * Find ^[...] markers whose entries do not parse against the documented
+ * paragraph or claim-level grammar (e.g. `^[file.md:abc]` or `^[file.md#X]`).
+ * Detects malformed claim-level citations without breaking the paragraph form.
+ */
+export async function checkMalformedClaimCitations(root: string): Promise<LintResult[]> {
+  const pages = await collectAllPages(root);
+  const results: LintResult[] = [];
+
+  for (const page of pages) {
+    for (const { captured, line } of findMatchesInContent(page.content, CITATION_PATTERN)) {
+      for (const part of captured.split(",")) {
+        if (!isMalformedCitationEntry(part)) continue;
+        results.push({
+          rule: "malformed-claim-citation",
+          severity: "error",
+          file: page.filePath,
+          message: `Malformed claim citation ^[${captured}] — expected file.md, file.md:N-N, or file.md#LN-LN`,
+          line,
+        });
       }
     }
   }
