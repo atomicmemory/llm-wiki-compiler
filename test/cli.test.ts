@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect } from "vitest";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import path from "path";
@@ -48,9 +48,6 @@ async function createCompileWorkspace(
 }
 
 describe("CLI smoke tests", () => {
-  beforeAll(async () => {
-    await exec("npx", ["tsup"], { cwd: path.resolve(".") });
-  }, 30_000);
   it("prints help and exits 0", async () => {
     const { stdout } = await exec("node", [CLI, "--help"]);
     expect(stdout).toContain("llmwiki");
