@@ -25,7 +25,7 @@ import path from "path";
 import { mkdir, rm, writeFile, readFile } from "fs/promises";
 import { existsSync } from "fs";
 import { tmpdir } from "os";
-import { runCLI } from "./fixtures/run-cli.js";
+import { runCLI, formatCLIFailure } from "./fixtures/run-cli.js";
 import type { ReviewCandidate } from "../src/utils/types.js";
 import type { LintResult } from "../src/linter/types.js";
 
@@ -130,7 +130,7 @@ describe("schema subprocess tests", () => {
         const result = await runCLI(["compile"], cwd, {
           ANTHROPIC_AUTH_TOKEN: "test-token-for-credential-check",
         });
-        expect(result.code).toBe(0);
+        expect(result.code, `compile failed:\n${formatCLIFailure(result)}`).toBe(0);
 
         // Seed page must exist at the expected path
         const pagePath = path.join(cwd, "wiki", "concepts", `${slug}.md`);
