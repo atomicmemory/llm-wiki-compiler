@@ -124,7 +124,12 @@ describe("schema subprocess tests", () => {
         const slug = "domain-overview";
         await writeSeedSchema(cwd, title);
 
-        const result = await runCLI(["compile"], cwd);
+        // requireProvider() runs before the early-return path, so we need
+        // credentials env-vars set even though no LLM call will be made
+        // (no source files → early-return → seed-page generation only).
+        const result = await runCLI(["compile"], cwd, {
+          ANTHROPIC_AUTH_TOKEN: "test-token-for-credential-check",
+        });
         expect(result.code).toBe(0);
 
         // Seed page must exist at the expected path
