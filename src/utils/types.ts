@@ -3,12 +3,41 @@
  * All shared interfaces live here to keep the module boundary clean.
  */
 
+/**
+ * Lifecycle state of a concept or page's provenance.
+ * - `extracted`: drawn directly from a source document.
+ * - `merged`: synthesised from multiple sources during compilation.
+ * - `inferred`: produced by the model from context, not directly cited.
+ * - `ambiguous`: sources disagree or evidence is conflicting.
+ */
+export type ProvenanceState = "extracted" | "merged" | "inferred" | "ambiguous";
+
+/**
+ * Reference to another concept that contradicts the current one.
+ * The slug points to the contradicting wiki page.
+ */
+export interface ContradictionRef {
+  slug: string;
+  reason?: string;
+}
+
 /** A single concept extracted from a source by the LLM. */
 export interface ExtractedConcept {
   concept: string;
   summary: string;
   is_new: boolean;
   tags?: string[];
+  /** Numeric confidence in 0..1 — how certain the model is in this concept. */
+  confidence?: number;
+  /** Lifecycle state describing how this concept was produced. */
+  provenanceState?: ProvenanceState;
+  /** Slugs of concepts whose evidence contradicts this one. */
+  contradictedBy?: ContradictionRef[];
+  /**
+   * Number of paragraphs the model considers inferred (not directly extracted).
+   * Used by the inferred-without-citations lint rule.
+   */
+  inferredParagraphs?: number;
 }
 
 /** Per-source entry in .llmwiki/state.json. */
@@ -43,6 +72,14 @@ interface WikiFrontmatter {
   aliases?: string[];
   createdAt: string;
   updatedAt: string;
+  /** Numeric confidence in 0..1 — overall confidence in the page's claims. */
+  confidence?: number;
+  /** Lifecycle state describing how the page's content was produced. */
+  provenanceState?: ProvenanceState;
+  /** Slugs of pages whose evidence contradicts this one. */
+  contradictedBy?: ContradictionRef[];
+  /** Number of inferred paragraphs in the page body without direct citations. */
+  inferredParagraphs?: number;
 }
 
 /** Summary entry used in index.md generation. */

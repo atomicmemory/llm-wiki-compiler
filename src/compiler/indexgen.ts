@@ -100,13 +100,13 @@ function buildIndexContent(concepts: PageSummary[], queries: PageSummary[]): str
   const lines = ["# Knowledge Wiki", "", "## Concepts", ""];
 
   for (const page of concepts) {
-    lines.push(`- **[[${page.title}]]** — ${stripWikilinks(page.summary)}`);
+    lines.push(`- **[[${page.slug}|${page.title}]]** — ${stripWikilinks(page.summary)}`);
   }
 
   if (queries.length > 0) {
     lines.push("", "## Saved Queries", "");
     for (const page of queries) {
-      lines.push(`- **[[${page.title}]]** — ${stripWikilinks(page.summary)}`);
+      lines.push(`- **[[${page.slug}|${page.title}]]** — ${stripWikilinks(page.summary)}`);
     }
   }
 
