@@ -17,7 +17,7 @@ describe("generateIndex", () => {
     await writePage(path.join(root, "wiki/concepts"), "alpha", { title: "Alpha", summary: "First concept" }, "Body of Alpha.");
     const index = await generateAndReadIndex(root);
 
-    expect(index).toContain("[[Alpha]]");
+    expect(index).toContain("[[alpha|Alpha]]");
     expect(index).toContain("First concept");
     expect(index).toContain("## Concepts");
   });
@@ -28,9 +28,9 @@ describe("generateIndex", () => {
     const index = await generateAndReadIndex(root);
 
     expect(index).toContain("## Concepts");
-    expect(index).toContain("[[Alpha]]");
+    expect(index).toContain("[[alpha|Alpha]]");
     expect(index).toContain("## Saved Queries");
-    expect(index).toContain("[[What is Alpha?]]");
+    expect(index).toContain("[[what-is-alpha|What is Alpha?]]");
   });
 
   it("omits Saved Queries section when no queries exist", async () => {
@@ -65,8 +65,8 @@ describe("generateIndex", () => {
     );
     const index = await generateAndReadIndex(root);
 
-    expect(index).toContain("[[Alive]]");
-    expect(index).not.toContain("[[Dead]]");
+    expect(index).toContain("[[alive|Alive]]");
+    expect(index).not.toContain("[[dead|Dead]]");
     expect(index).toContain("1 pages");
   });
 });

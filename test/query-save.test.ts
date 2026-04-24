@@ -93,7 +93,7 @@ describe("query --save integration", () => {
 
     // The index should have the query's summary as retrieval signal
     expect(index).toContain("## Saved Queries");
-    expect(index).toContain("[[What is an LLM?]]");
+    expect(index).toContain("[[what-is-an-llm|What is an LLM?]]");
     expect(index).toContain("An LLM is a large language model trained on text corpora.");
   });
 
@@ -112,7 +112,7 @@ describe("query --save integration", () => {
     const index = await generateAndReadIndex(root);
 
     // Without summary, the index line has no retrieval context after the dash
-    expect(index).toContain("[[What is backpropagation?]]");
-    expect(index).toMatch(/\[\[What is backpropagation\?\]\]\*\* —\s*$/m);
+    expect(index).toContain("[[what-is-backpropagation|What is backpropagation?]]");
+    expect(index).toMatch(/\[\[what-is-backpropagation\|What is backpropagation\?\]\]\*\* —\s*$/m);
   });
 });
