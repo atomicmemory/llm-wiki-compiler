@@ -1,12 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { execFile } from "child_process";
-import { promisify } from "util";
 import path from "path";
 import { mkdir, rm, writeFile } from "fs/promises";
 import { tmpdir } from "os";
-
-const exec = promisify(execFile);
-const CLI = path.resolve("dist/cli.js");
+import { exec, CLI } from "./fixtures/cli-runner.js";
 
 async function cleanupDirectory(directory: string): Promise<void> {
   await rm(directory, { recursive: true, force: true });

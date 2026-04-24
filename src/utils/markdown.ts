@@ -7,7 +7,21 @@
 import { writeFile, rename, readFile, mkdir } from "fs/promises";
 import path from "path";
 import yaml from "js-yaml";
-import type { ContradictionRef, ProvenanceState } from "./types.js";
+import type {
+  ClaimCitation,
+  ContradictionRef,
+  ProvenanceState,
+  SourceSpan,
+} from "./types.js";
+
+/** Regex matching `^[...]` citation markers (paragraph or claim-level). */
+const CITATION_MARKER_PATTERN = /\^\[([^\]]+)\]/g;
+
+/** Regex matching the optional `:start-end` or `#Lstart-Lend` span suffix on a citation entry. */
+const SPAN_SUFFIX_PATTERN = /^(?<file>[^:#]+)(?:(?::(?<colonStart>\d+)(?:-(?<colonEnd>\d+))?)|(?:#L(?<hashStart>\d+)(?:-L(?<hashEnd>\d+))?))?$/;
+
+/** The minimum valid line number in a source span (lines are 1-indexed). */
+const MIN_LINE_NUMBER = 1;
 
 /** The set of valid provenance state strings, used to reject unknown values. */
 const VALID_PROVENANCE_STATES: ReadonlySet<ProvenanceState> = new Set([
@@ -74,26 +88,130 @@ export async function atomicWrite(filePath: string, content: string): Promise<vo
 
 /**
  * Extract all source filenames from ^[filename.md] citation markers in a page body.
- * Handles single citations (^[source.md]) and multi-source (^[a.md, b.md]).
+ * Handles paragraph form (`^[source.md]`), multi-source (`^[a.md, b.md]`), and the
+ * claim-level extension that pins a line range (`^[source.md:42-58]` or
+ * `^[source.md#L42-L58]`). Only the filename component is returned — span data is
+ * discarded so existing callers continue to receive a flat filename list.
  * @param body - The markdown body text to parse.
  * @returns Array of unique source filenames.
  */
 export function extractCitations(body: string): string[] {
-  const citationPattern = /\^\[([^\]]+)\]/g;
   const filenames = new Set<string>();
-
-  let match;
-  while ((match = citationPattern.exec(body)) !== null) {
-    const inner = match[1];
-    for (const part of inner.split(",")) {
-      const trimmed = part.trim();
-      if (trimmed.length > 0) {
-        filenames.add(trimmed);
-      }
+  for (const citation of extractClaimCitations(body)) {
+    for (const span of citation.spans) {
+      if (span.file.length > 0) filenames.add(span.file);
     }
   }
-
   return [...filenames];
+}
+
+/**
+ * Extract claim-level citations from a markdown body. Each `^[...]` marker
+ * becomes one `ClaimCitation`; comma-separated entries inside a single marker
+ * become multiple spans on that citation. Entries that fail to parse against
+ * the span grammar are returned as bare-file spans so callers can still tell
+ * the marker was present (the linter inspects `raw` to flag malformed forms).
+ * @param body - The markdown body text to parse.
+ * @returns Array of ClaimCitation objects in document order.
+ */
+export function extractClaimCitations(body: string): ClaimCitation[] {
+  const citations: ClaimCitation[] = [];
+  let match: RegExpExecArray | null;
+  CITATION_MARKER_PATTERN.lastIndex = 0;
+  while ((match = CITATION_MARKER_PATTERN.exec(body)) !== null) {
+    const raw = match[1];
+    const spans = parseCitationEntries(raw);
+    if (spans.length > 0) citations.push({ raw, spans });
+  }
+  return citations;
+}
+
+/** Parse the inside of `^[...]` into one or more SourceSpan entries. */
+function parseCitationEntries(inner: string): SourceSpan[] {
+  const spans: SourceSpan[] = [];
+  for (const part of inner.split(",")) {
+    const trimmed = part.trim();
+    if (trimmed.length === 0) continue;
+    const span = parseSpanEntry(trimmed);
+    // Skip entries with invalid line ranges — the linter flags them separately.
+    if (span !== undefined) spans.push(span);
+  }
+  return spans;
+}
+
+/**
+ * Parse a single citation entry (`file.md` / `file.md:1-3` / `file.md#L1-L3`).
+ * Returns undefined when the parsed line range is semantically invalid (line
+ * numbers must be >= 1 and end must be >= start).
+ */
+function parseSpanEntry(entry: string): SourceSpan | undefined {
+  const match = SPAN_SUFFIX_PATTERN.exec(entry);
+  if (!match || !match.groups) {
+    return { file: entry };
+  }
+  const { file, colonStart, colonEnd, hashStart, hashEnd } = match.groups;
+  const start = colonStart ?? hashStart;
+  const end = colonEnd ?? hashEnd;
+  if (start === undefined) return { file };
+  const startLine = Number(start);
+  const endLine = end === undefined ? startLine : Number(end);
+  if (!isValidLineRange(startLine, endLine)) return undefined;
+  return { file, lines: { start: startLine, end: endLine } };
+}
+
+/** Returns true when both lines are >= 1 and end is not before start. */
+function isValidLineRange(start: number, end: number): boolean {
+  return start >= MIN_LINE_NUMBER && end >= start;
+}
+
+/**
+ * Detect whether a citation entry is malformed: bracket text that contains
+ * `:` or `#` characters but does not match the documented span grammar, or
+ * contains a semantically invalid line range (line 0 or end before start).
+ * Used by the linter to flag broken claim-level provenance markers.
+ */
+export function isMalformedCitationEntry(entry: string): boolean {
+  const trimmed = entry.trim();
+  if (trimmed.length === 0) return true;
+  if (!trimmed.includes(":") && !trimmed.includes("#")) return false;
+  const match = SPAN_SUFFIX_PATTERN.exec(trimmed);
+  if (!match || !match.groups) return true;
+  const { colonStart, colonEnd, hashStart, hashEnd } = match.groups;
+  const start = colonStart ?? hashStart;
+  const end = colonEnd ?? hashEnd;
+  if (start === undefined) return false;
+  const startLine = Number(start);
+  const endLine = end === undefined ? startLine : Number(end);
+  return !isValidLineRange(startLine, endLine);
+}
+
+/**
+ * Inspect provenance for a page body, grouping every parsed span by source file.
+ * Useful for tooling that wants to render a "this page draws from" panel without
+ * worrying about how the markers were formatted in source. Each filename maps to
+ * a deduplicated list of `{start, end}` line ranges (paragraph-only citations
+ * appear as the empty array, signalling "no specific span").
+ */
+export function inspectProvenance(body: string): Map<string, Array<{ start: number; end: number }>> {
+  const grouped = new Map<string, Array<{ start: number; end: number }>>();
+  for (const citation of extractClaimCitations(body)) {
+    for (const span of citation.spans) {
+      const ranges = grouped.get(span.file) ?? [];
+      if (span.lines && !rangeAlreadyTracked(ranges, span.lines)) {
+        ranges.push(span.lines);
+      }
+      grouped.set(span.file, ranges);
+    }
+  }
+  return grouped;
+}
+
+/** Has this start/end pair already been recorded for a file? */
+function rangeAlreadyTracked(
+  ranges: Array<{ start: number; end: number }>,
+  candidate: { start: number; end: number },
+): boolean {
+  return ranges.some((r) => r.start === candidate.start && r.end === candidate.end);
 }
 
 /** Read a file, returning empty string if it doesn't exist. */
