@@ -12,31 +12,17 @@
  * The compiled output is then read back and parsed to assert on frontmatter.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdir, rm, writeFile, readFile } from "fs/promises";
+import { describe, it, expect, vi } from "vitest";
+import { readFile } from "fs/promises";
 import path from "path";
-import os from "os";
 import { compileAndReport } from "../src/compiler/index.js";
 import { parseFrontmatter, parseProvenanceMetadata } from "../src/utils/markdown.js";
 import { AnthropicProvider } from "../src/providers/anthropic.js";
+import { useCompileProject } from "./fixtures/compile-project.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** Build a minimal project root with one source file. */
-async function makeProjectRoot(suffix: string): Promise<string> {
-  const root = path.join(os.tmpdir(), `llmwiki-compile-prov-${suffix}-${Date.now()}`);
-  await mkdir(path.join(root, "sources"), { recursive: true });
-  await mkdir(path.join(root, "wiki", "concepts"), { recursive: true });
-  await mkdir(path.join(root, ".llmwiki"), { recursive: true });
-  await writeFile(
-    path.join(root, "sources", "sample.md"),
-    "# Sample\n\nSome source content about a topic.",
-    "utf-8",
-  );
-  return root;
-}
 
 /** Extraction tool JSON that instructs the compiler to produce provenance metadata. */
 function buildExtractionResponse(): string {
@@ -63,20 +49,7 @@ const STUB_PAGE_BODY = "The sample topic is described here. ^[sample.md]";
 // ---------------------------------------------------------------------------
 
 describe("compile-path provenance metadata", () => {
-  let tmpDir: string;
-
-  beforeEach(async () => {
-    process.env.LLMWIKI_PROVIDER = "anthropic";
-    process.env.ANTHROPIC_API_KEY = "test-key";
-    tmpDir = await makeProjectRoot("meta");
-  });
-
-  afterEach(async () => {
-    vi.restoreAllMocks();
-    delete process.env.LLMWIKI_PROVIDER;
-    delete process.env.ANTHROPIC_API_KEY;
-    await rm(tmpDir, { recursive: true, force: true });
-  });
+  const ctx = useCompileProject({ dirSuffix: "prov-meta" });
 
   it("writes confidence, provenanceState, and contradictedBy into frontmatter", async () => {
     vi.spyOn(AnthropicProvider.prototype, "toolCall").mockResolvedValue(
@@ -84,9 +57,9 @@ describe("compile-path provenance metadata", () => {
     );
     vi.spyOn(AnthropicProvider.prototype, "complete").mockResolvedValue(STUB_PAGE_BODY);
 
-    await compileAndReport(tmpDir);
+    await compileAndReport(ctx.dir);
 
-    const pagePath = path.join(tmpDir, "wiki", "concepts", "sample-topic.md");
+    const pagePath = path.join(ctx.dir, "wiki", "concepts", "sample-topic.md");
     const content = await readFile(pagePath, "utf-8");
     const { meta } = parseFrontmatter(content);
     const provenance = parseProvenanceMetadata(meta);
@@ -107,7 +80,7 @@ describe("compile-path provenance metadata", () => {
 
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
-    await compileAndReport(tmpDir);
+    await compileAndReport(ctx.dir);
 
     // reportContradictionWarnings calls output.status("!", output.warn(...))
     // which maps to console.log("! <yellow>Contradiction reported on...<reset>")
