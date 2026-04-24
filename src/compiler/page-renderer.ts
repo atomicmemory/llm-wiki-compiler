@@ -18,6 +18,7 @@ import {
 import { callClaude } from "../utils/llm.js";
 import { buildPagePrompt } from "./prompts.js";
 import { addObsidianMeta } from "./obsidian.js";
+import { addProvenanceMeta, reportContradictionWarnings } from "./provenance.js";
 import { CONCEPTS_DIR } from "../utils/constants.js";
 import type { SchemaConfig } from "../schema/index.js";
 import type { ExtractedConcept } from "../utils/types.js";
@@ -65,6 +66,7 @@ export async function renderMergedPageContent(
   });
 
   const frontmatter = buildMergedFrontmatter(entry, existingPage, schema);
+  reportContradictionWarnings(entry.concept.concept, entry.concept);
   return `${frontmatter}\n\n${pageBody}\n`;
 }
 
@@ -91,6 +93,7 @@ function buildMergedFrontmatter(
     updatedAt: now,
   };
   addObsidianMeta(frontmatterFields, entry.concept.concept, entry.concept.tags ?? []);
+  addProvenanceMeta(frontmatterFields, entry.concept);
   return buildFrontmatter(frontmatterFields);
 }
 

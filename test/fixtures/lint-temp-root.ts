@@ -1,7 +1,14 @@
 /**
- * Shared test fixtures for lint-style tests that need a tmp wiki layout
- * (concepts + queries + sources directories) and helpers for writing
- * raw markdown strings into them.
+ * Shared test helpers for creating a temporary llmwiki layout used by
+ * lint-rule tests. Sets up wiki/concepts, wiki/queries, and sources/
+ * directories under a unique temp root.
+ *
+ * Two APIs are provided:
+ * - `makeLintTempRoot` — async factory returning a fresh root per call;
+ *   callers manage their own beforeEach/afterEach lifecycle.
+ * - `useLintTempRoot` — vitest lifecycle helper that wires beforeEach /
+ *   afterEach automatically; used by schema-lint tests that prefer the
+ *   hook-based style.
  */
 
 import { mkdtemp, mkdir, rm, writeFile } from "fs/promises";
@@ -9,8 +16,42 @@ import path from "path";
 import os from "os";
 import { beforeEach, afterEach } from "vitest";
 
-/** Live state populated by `useLintTempRoot` for each test. */
+/** Common shape returned by makeLintTempRoot — root path and writers. */
 export interface LintTempRoot {
+  root: string;
+  writeConceptPage: (slug: string, content: string) => Promise<void>;
+  writeQueryPage: (slug: string, content: string) => Promise<void>;
+  writeSourceFile: (name: string, content: string) => Promise<void>;
+}
+
+/**
+ * Create a temp directory with the standard wiki/sources layout that lint
+ * rules expect. Each call returns a fresh isolated path along with helpers
+ * for writing concept pages, query pages, and source files.
+ * @param prefix - Short label appended to the temp directory name.
+ */
+export async function makeLintTempRoot(prefix: string): Promise<LintTempRoot> {
+  const root = await mkdtemp(path.join(os.tmpdir(), `${prefix}-`));
+  await mkdir(path.join(root, "wiki", "concepts"), { recursive: true });
+  await mkdir(path.join(root, "wiki", "queries"), { recursive: true });
+  await mkdir(path.join(root, "sources"), { recursive: true });
+  return {
+    root,
+    writeConceptPage: (slug, content) =>
+      writeFile(path.join(root, "wiki", "concepts", `${slug}.md`), content),
+    writeQueryPage: (slug, content) =>
+      writeFile(path.join(root, "wiki", "queries", `${slug}.md`), content),
+    writeSourceFile: (name, content) =>
+      writeFile(path.join(root, "sources", name), content),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Hook-based API used by schema-lint tests
+// ---------------------------------------------------------------------------
+
+/** Live state populated by `useLintTempRoot` for each test. */
+export interface HookLintTempRoot {
   /** Absolute path to the temp project root, valid inside `it` blocks. */
   dir: string;
   /** Write a raw markdown string to wiki/concepts/<slug>.md. */
@@ -28,8 +69,8 @@ export interface LintTempRoot {
  * @param prefix - Short label for the temp directory name.
  * @returns A live handle whose fields refresh per test.
  */
-export function useLintTempRoot(prefix: string): LintTempRoot {
-  const env: LintTempRoot = {
+export function useLintTempRoot(prefix: string): HookLintTempRoot {
+  const env: HookLintTempRoot = {
     dir: "",
     writeConcept: notInitialized,
     writeQuery: notInitialized,

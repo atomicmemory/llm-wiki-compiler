@@ -14,6 +14,9 @@ import {
   checkDuplicateConcepts,
   checkEmptyPages,
   checkBrokenCitations,
+  checkLowConfidencePages,
+  checkContradictedPages,
+  checkInferredWithoutCitations,
   checkSchemaCrossLinks,
 } from "./rules.js";
 import { loadSchema } from "../schema/index.js";
@@ -26,6 +29,9 @@ const RULES_WITHOUT_SCHEMA: LintRule[] = [
   checkDuplicateConcepts,
   checkEmptyPages,
   checkBrokenCitations,
+  checkLowConfidencePages,
+  checkContradictedPages,
+  checkInferredWithoutCitations,
 ];
 
 /** Lint rules that need the resolved schema to know per-kind expectations. */
