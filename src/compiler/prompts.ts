@@ -5,7 +5,19 @@
  * and a parser for the structured tool output.
  */
 
-import type { ExtractedConcept } from "../utils/types.js";
+import type {
+  ContradictionRef,
+  ExtractedConcept,
+  ProvenanceState,
+} from "../utils/types.js";
+
+/** Allowed provenance state strings emitted by the LLM tool schema. */
+const PROVENANCE_STATE_VALUES: ProvenanceState[] = [
+  "extracted",
+  "merged",
+  "inferred",
+  "ambiguous",
+];
 
 /**
  * Anthropic Tool definition for extracting knowledge concepts from a source.
@@ -40,6 +52,34 @@ export const CONCEPT_EXTRACTION_TOOL = {
               description:
                 "2-4 categorical tags for organizing this concept (e.g., 'machine-learning', 'optimization')",
             },
+            confidence: {
+              type: "number",
+              description:
+                "Confidence in this concept on a 0..1 scale (1 = directly stated, 0 = highly speculative).",
+            },
+            provenance_state: {
+              type: "string",
+              enum: PROVENANCE_STATE_VALUES,
+              description:
+                "How this concept was produced: 'extracted' (direct from source), 'merged' (synthesised across sources), 'inferred' (model deduction), or 'ambiguous' (sources disagree).",
+            },
+            contradicted_by: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  slug: { type: "string", description: "Slug of the contradicting concept." },
+                  reason: { type: "string", description: "Brief reason for the contradiction." },
+                },
+                required: ["slug"],
+              },
+              description: "Slugs of other concepts whose evidence contradicts this one.",
+            },
+            inferred_paragraphs: {
+              type: "integer",
+              description:
+                "Estimated number of paragraphs in the page that will be inferred rather than directly cited.",
+            },
           },
           required: ["concept", "summary", "is_new"],
         },
@@ -70,6 +110,17 @@ export function buildExtractionPrompt(
     "Each concept should be a standalone topic that someone might look up.",
     "Focus on key ideas, techniques, patterns, or entities — not trivial details.",
     "Use the extract_concepts tool to return your findings.",
+    "",
+    "For every concept, emit provenance metadata so downstream tools can reason",
+    "about reliability:",
+    "  - confidence: 0..1 — how certain you are the source supports this concept.",
+    "  - provenance_state: 'extracted' if directly stated, 'merged' if synthesised",
+    "    from multiple parts of the source, 'inferred' if reasoned from context,",
+    "    or 'ambiguous' if the source is contradictory or unclear.",
+    "  - contradicted_by: slugs of other concepts (in this batch or the index)",
+    "    whose evidence conflicts with this one.",
+    "  - inferred_paragraphs: estimated number of paragraphs in the resulting",
+    "    page that will be inferred rather than directly citable.",
     indexSection,
     "\n\n--- SOURCE DOCUMENT ---\n\n",
     sourceContent,
@@ -111,11 +162,73 @@ export function buildPagePrompt(
     "Format: ^[filename.md] for single-source, ^[source-a.md, source-b.md] for multi-source.",
     "Place citations only at the end of prose paragraphs — not on headings, list items, or code blocks.",
     "Source filenames are visible as `--- SOURCE: filename.md ---` headers in the content below.",
+    "",
+    "If a paragraph is your inference rather than a direct extraction, leave it",
+    "uncited — downstream lint rules will count uncited paragraphs as 'inferred'",
+    "to compute the page's provenance metadata.",
     existingSection,
     relatedSection,
     "\n\n--- SOURCE MATERIAL ---\n\n",
     sourceContent,
   ].join("\n");
+}
+
+/** Raw concept shape as it arrives from the tool JSON. */
+interface RawConcept {
+  concept: unknown;
+  summary: unknown;
+  is_new: unknown;
+  tags?: unknown;
+  confidence?: unknown;
+  provenance_state?: unknown;
+  contradicted_by?: unknown;
+  inferred_paragraphs?: unknown;
+}
+
+/** True if the raw concept has the required string/boolean fields. */
+function isValidRawConcept(c: RawConcept): boolean {
+  return (
+    typeof c.concept === "string" &&
+    typeof c.summary === "string" &&
+    typeof c.is_new === "boolean" &&
+    (c.tags === undefined || Array.isArray(c.tags))
+  );
+}
+
+/** Coerce raw contradiction entries from the tool into typed refs. */
+function coerceContradictedBy(raw: unknown): ContradictionRef[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const refs: ContradictionRef[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const obj = entry as { slug?: unknown; reason?: unknown };
+    if (typeof obj.slug !== "string" || obj.slug.trim().length === 0) continue;
+    const ref: ContradictionRef = { slug: obj.slug.trim() };
+    if (typeof obj.reason === "string") ref.reason = obj.reason;
+    refs.push(ref);
+  }
+  return refs.length > 0 ? refs : undefined;
+}
+
+/** Map a validated raw concept into an ExtractedConcept. */
+function mapRawConcept(c: RawConcept): ExtractedConcept {
+  const provenance = typeof c.provenance_state === "string" &&
+    PROVENANCE_STATE_VALUES.includes(c.provenance_state as ProvenanceState)
+    ? (c.provenance_state as ProvenanceState)
+    : undefined;
+  return {
+    concept: c.concept as string,
+    summary: c.summary as string,
+    is_new: c.is_new as boolean,
+    tags: Array.isArray(c.tags) ? (c.tags as string[]) : undefined,
+    confidence: typeof c.confidence === "number" ? c.confidence : undefined,
+    provenanceState: provenance,
+    contradictedBy: coerceContradictedBy(c.contradicted_by),
+    inferredParagraphs: typeof c.inferred_paragraphs === "number" &&
+      Number.isInteger(c.inferred_paragraphs) && c.inferred_paragraphs >= 0
+      ? c.inferred_paragraphs
+      : undefined,
+  };
 }
 
 /**
@@ -126,21 +239,8 @@ export function buildPagePrompt(
 export function parseConcepts(toolOutput: string): ExtractedConcept[] {
   try {
     const parsed = JSON.parse(toolOutput);
-    const concepts: ExtractedConcept[] = parsed.concepts ?? [];
-    return concepts
-      .filter(
-        (c) =>
-          typeof c.concept === "string" &&
-          typeof c.summary === "string" &&
-          typeof c.is_new === "boolean" &&
-          (c.tags === undefined || Array.isArray(c.tags)),
-      )
-      .map((c) => ({
-        concept: c.concept,
-        summary: c.summary,
-        is_new: c.is_new,
-        tags: Array.isArray(c.tags) ? c.tags : undefined,
-      }));
+    const concepts: RawConcept[] = parsed.concepts ?? [];
+    return concepts.filter(isValidRawConcept).map(mapRawConcept);
   } catch {
     return [];
   }

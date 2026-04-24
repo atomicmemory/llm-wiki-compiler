@@ -42,9 +42,9 @@ describe("knowledge compounding loop", () => {
     const index = await generateAndReadIndex(root);
 
     expect(index).toContain("## Concepts");
-    expect(index).toContain("[[Knowledge Compilation]]");
+    expect(index).toContain("[[knowledge-compilation|Knowledge Compilation]]");
     expect(index).toContain("## Saved Queries");
-    expect(index).toContain("[[What is Knowledge Compilation?]]");
+    expect(index).toContain("[[what-is-knowledge-compilation|What is Knowledge Compilation?]]");
     expect(index).toContain("2 pages");
   });
 
