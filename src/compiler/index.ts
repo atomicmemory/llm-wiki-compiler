@@ -241,6 +241,14 @@ async function runCompilePipeline(
     if (!options.review) {
       const emptyGeneration: PageGenerationResult = { pages: [], errors: [], candidates: [] };
       await generateSeedPages(root, schema, emptyGeneration);
+      // Rebuild index/MOC so the newly-written seed pages become discoverable,
+      // and propagate any seed-page validation errors into the returned result.
+      await finalizeWiki(root, emptyGeneration.pages);
+      return {
+        ...emptyCompileResult(),
+        skipped: buckets.unchanged.length,
+        errors: emptyGeneration.errors,
+      };
     }
     return { ...emptyCompileResult(), skipped: buckets.unchanged.length };
   }

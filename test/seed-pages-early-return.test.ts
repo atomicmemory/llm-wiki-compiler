@@ -1,18 +1,22 @@
 /**
  * Regression tests for seed-page generation when no source files changed
- * (Finding 1).
+ * (Finding 1 and Finding 2).
  *
- * Before the fix, `runCompilePipeline` returned early when there was nothing to
- * compile, skipping `generateSeedPages`. Adding a seed page to schema.json in
- * an up-to-date project had no effect until a source file was also changed.
+ * Finding 1 — before the fix, `runCompilePipeline` returned early when there
+ * was nothing to compile, skipping `generateSeedPages`. Adding a seed page to
+ * schema.json in an up-to-date project had no effect until a source file was
+ * also changed.  After the fix, seed pages are always written on the early-
+ * return path and `finalizeWiki` is called so wiki/index.md and wiki/MOC.md
+ * are rebuilt to include the new seed page.
  *
- * After the fix, seed pages declared in the schema are always written — even
- * when the early-return path is taken — because they are cheap deterministic
- * writes that never require LLM extraction.
+ * Finding 2 — before the fix, errors collected by `generateSeedPages` were
+ * discarded on the early-return path because the temporary `emptyGeneration`
+ * object was never threaded into the returned `CompileResult`. After the fix,
+ * `emptyGeneration.errors` is propagated into the result.
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { mkdir, writeFile } from "fs/promises";
+import { mkdir, writeFile, readFile } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
 import { compileAndReport } from "../src/compiler/index.js";
@@ -35,8 +39,8 @@ async function stubLLMForSeedPage(seedTitle: string): Promise<void> {
 }
 
 /** Write a schema declaring one overview seed page. */
-async function writeSchemaWithSeedPage(root: string, seedTitle: string): Promise<void> {
-  await mkdir(path.join(root, ".llmwiki"), { recursive: true });
+async function writeSchemaWithSeedPage(rootDir: string, seedTitle: string): Promise<void> {
+  await mkdir(path.join(rootDir, ".llmwiki"), { recursive: true });
   const schema = {
     version: 1,
     defaultKind: "concept",
@@ -46,7 +50,7 @@ async function writeSchemaWithSeedPage(root: string, seedTitle: string): Promise
     ],
   };
   await writeFile(
-    path.join(root, ".llmwiki", "schema.json"),
+    path.join(rootDir, ".llmwiki", "schema.json"),
     JSON.stringify(schema, null, 2),
   );
 }
@@ -68,6 +72,21 @@ describe("seed pages generated when no source files changed", () => {
     expect(existsSync(seedPath)).toBe(true);
   });
 
+  it("rebuilds wiki/index.md after writing seed pages on the early-return path", async () => {
+    const seedTitle = "Domain Overview";
+    await writeSchemaWithSeedPage(root.dir, seedTitle);
+    await stubLLMForSeedPage(seedTitle);
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await compileAndReport(root.dir, {});
+
+    // wiki/index.md must exist and reference the newly-written seed page
+    const indexPath = path.join(root.dir, "wiki", "index.md");
+    expect(existsSync(indexPath)).toBe(true);
+    const indexContent = await readFile(indexPath, "utf-8");
+    expect(indexContent).toContain("domain-overview");
+  });
+
   it("does not generate seed pages in review mode (review keeps wiki/ clean)", async () => {
     const seedTitle = "Review Overview";
     await writeSchemaWithSeedPage(root.dir, seedTitle);
@@ -79,5 +98,22 @@ describe("seed pages generated when no source files changed", () => {
     // Seed pages must not land in wiki/ when running in review mode
     const seedPath = path.join(root.dir, CONCEPTS_DIR, "review-overview.md");
     expect(existsSync(seedPath)).toBe(false);
+  });
+
+  it("propagates seed-page validation errors into CompileResult on the early-return path", async () => {
+    const seedTitle = "Broken Overview";
+    await writeSchemaWithSeedPage(root.dir, seedTitle);
+    await stubLLMForSeedPage(seedTitle);
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    // Force validateWikiPage to reject the seed page so an error is recorded
+    const markdownUtils = await import("../src/utils/markdown.js");
+    vi.spyOn(markdownUtils, "validateWikiPage").mockReturnValue(false);
+
+    const result = await compileAndReport(root.dir, {});
+
+    // The seed-page error must surface in CompileResult.errors
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors.some((e) => e.includes("Broken Overview"))).toBe(true);
   });
 });
