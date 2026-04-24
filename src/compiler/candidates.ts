@@ -23,6 +23,7 @@ import {
   CANDIDATES_ARCHIVE_DIR,
 } from "../utils/constants.js";
 import type { ReviewCandidate, SourceState } from "../utils/types.js";
+import type { LintResult } from "../linter/types.js";
 
 /** Length (bytes) of the random suffix appended to candidate ids. */
 const ID_SUFFIX_BYTES = 4;
@@ -43,6 +44,11 @@ interface CandidateDraft {
    * never need incremental tracking (legacy / tests) can omit it.
    */
   sourceStates?: Record<string, SourceState>;
+  /**
+   * Schema lint violations for the candidate body detected at compile time.
+   * Omit (or pass `undefined`) when the candidate body is clean.
+   */
+  schemaViolations?: LintResult[];
 }
 
 /** Build a deterministic-but-unique id from a slug and a short random suffix. */
@@ -81,6 +87,7 @@ export async function writeCandidate(
     body: draft.body,
     generatedAt: new Date().toISOString(),
     ...(draft.sourceStates ? { sourceStates: draft.sourceStates } : {}),
+    ...(draft.schemaViolations ? { schemaViolations: draft.schemaViolations } : {}),
   };
 
   await atomicWrite(candidatePath(root, candidate.id), JSON.stringify(candidate, null, 2));

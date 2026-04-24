@@ -47,6 +47,7 @@ import { generateIndex } from "./indexgen.js";
 import { addObsidianMeta, generateMOC } from "./obsidian.js";
 import { updateEmbeddings } from "../utils/embeddings.js";
 import { writeCandidate } from "./candidates.js";
+import { checkPageCrossLinks } from "../linter/rules.js";
 import { renderMergedPageContent } from "./page-renderer.js";
 import * as output from "../utils/output.js";
 import {
@@ -234,6 +235,13 @@ async function runCompilePipeline(
   const buckets = bucketChanges(changes);
   if (buckets.toCompile.length === 0 && buckets.deleted.length === 0) {
     output.status("✓", output.success("Nothing to compile — all sources up to date."));
+    // Seed pages are cheap deterministic writes — always run them even when
+    // no source files changed, so adding a seed page to schema.json takes
+    // effect on the next compile without needing a source file edit.
+    if (!options.review) {
+      const emptyGeneration: PageGenerationResult = { pages: [], errors: [], candidates: [] };
+      await generateSeedPages(root, schema, emptyGeneration);
+    }
     return { ...emptyCompileResult(), skipped: buckets.unchanged.length };
   }
 
@@ -502,7 +510,7 @@ async function generateMergedPage(
   const fullPage = await renderMergedPageContent(root, entry, schema);
 
   if (options.review) {
-    return await persistReviewCandidate(root, entry, fullPage, sourceStates);
+    return await persistReviewCandidate(root, entry, fullPage, sourceStates, schema);
   }
 
   const pagePath = path.join(root, CONCEPTS_DIR, `${entry.slug}.md`);
@@ -516,7 +524,14 @@ async function persistReviewCandidate(
   entry: MergedConcept,
   fullPage: string,
   sourceStates: SourceStateMap,
+  schema: SchemaConfig,
 ): Promise<MergedPageOutcome> {
+  // Run schema-aware lint against the candidate body so violations are visible
+  // in `review show` before a reviewer approves the page. The virtual file path
+  // uses the slug so diagnostics are identifiable without a real disk path.
+  const virtualPath = `wiki/concepts/${entry.slug}.md`;
+  const violations = checkPageCrossLinks(fullPage, virtualPath, schema);
+
   const candidate: ReviewCandidate = await writeCandidate(root, {
     title: entry.concept.concept,
     slug: entry.slug,
@@ -524,6 +539,7 @@ async function persistReviewCandidate(
     sources: entry.sourceFiles,
     body: fullPage,
     sourceStates: pickStatesForSources(sourceStates, entry.sourceFiles),
+    schemaViolations: violations.length > 0 ? violations : undefined,
   });
   output.status("?", output.info(`Candidate ready: ${candidate.id} (${entry.slug})`));
   return { candidateId: candidate.id };

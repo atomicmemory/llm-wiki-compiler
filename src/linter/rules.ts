@@ -383,6 +383,47 @@ export async function checkSchemaCrossLinks(
   return results;
 }
 
+/**
+ * Check cross-link minimums for a single page given as a raw content string.
+ *
+ * Unlike `checkSchemaCrossLinks`, this function operates on content already in
+ * memory without reading from disk. Used by the review pipeline to attach
+ * schema violations to a candidate at write time so `review show` can surface
+ * them before the reviewer approves the page.
+ *
+ * The `filePath` parameter is embedded verbatim in each `LintResult.file` so
+ * callers control how the candidate is identified in diagnostic output.
+ *
+ * @param content - Full page content including frontmatter.
+ * @param filePath - Logical file path to embed in diagnostics (may be virtual).
+ * @param schema - Resolved schema config.
+ * @returns Lint results for this single page, empty when no violations found.
+ */
+export function checkPageCrossLinks(
+  content: string,
+  filePath: string,
+  schema: SchemaConfig,
+): LintResult[] {
+  const { meta, body } = parseFrontmatter(content);
+  const kind = resolvePageKind(meta.kind, schema);
+  const rule = schema.kinds[kind];
+  if (rule.minWikilinks <= 0) return [];
+
+  const linkCount = countWikilinks(body);
+  if (linkCount >= rule.minWikilinks) return [];
+
+  return [
+    {
+      rule: "schema-cross-link-minimum",
+      severity: "warning",
+      file: filePath,
+      message:
+        `Page kind "${kind}" requires at least ${rule.minWikilinks} ` +
+        `[[wikilinks]] but only ${linkCount} found.`,
+    },
+  ];
+}
+
 /** Extract the line range from a citation entry string, or return null if there is none. */
 function parseLineRange(entry: string): ParsedLineRange | null {
   const colonMatch = COLON_SPAN_PATTERN.exec(entry);

@@ -6,7 +6,7 @@
 import { describe, it, expect } from "vitest";
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
-import { checkSchemaCrossLinks } from "../src/linter/rules.js";
+import { checkSchemaCrossLinks, checkPageCrossLinks } from "../src/linter/rules.js";
 import { lint } from "../src/linter/index.js";
 import { buildDefaultSchema } from "../src/schema/index.js";
 import { useLintTempRoot } from "./fixtures/lint-temp-root.js";
@@ -58,6 +58,36 @@ describe("checkSchemaCrossLinks", () => {
     const results = await checkSchemaCrossLinks(tmpDir(), schema);
     expect(results).toHaveLength(1);
     expect(results[0].message).toContain("at least 2");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkPageCrossLinks — single-page in-memory variant (Finding 2)
+// ---------------------------------------------------------------------------
+
+describe("checkPageCrossLinks", () => {
+  it("returns a violation when the page has fewer wikilinks than required", () => {
+    const schema = buildDefaultSchema();
+    const content = "---\ntitle: Overview\nkind: overview\n---\nOnly [[One]] link.";
+    const results = checkPageCrossLinks(content, "wiki/concepts/overview.md", schema);
+    expect(results).toHaveLength(1);
+    expect(results[0].rule).toBe("schema-cross-link-minimum");
+    expect(results[0].message).toContain("overview");
+    expect(results[0].file).toBe("wiki/concepts/overview.md");
+  });
+
+  it("returns no violations when the page meets the minimum", () => {
+    const schema = buildDefaultSchema();
+    const content = "---\ntitle: Overview\nkind: overview\n---\nSees [[A]], [[B]], [[C]].";
+    const results = checkPageCrossLinks(content, "wiki/concepts/overview.md", schema);
+    expect(results).toHaveLength(0);
+  });
+
+  it("returns no violations for concept pages with default minimum of 0", () => {
+    const schema = buildDefaultSchema();
+    const content = "---\ntitle: Simple\nkind: concept\n---\nNo links at all.";
+    const results = checkPageCrossLinks(content, "wiki/concepts/simple.md", schema);
+    expect(results).toHaveLength(0);
   });
 });
 

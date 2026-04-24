@@ -7,16 +7,12 @@
  * lint rule evaluation — is exercised end-to-end without mocks.
  */
 
-import { describe, it, expect, beforeAll } from "vitest";
-import { execFile } from "child_process";
-import { promisify } from "util";
+import { describe, it, expect } from "vitest";
 import path from "path";
 import { mkdir, readFile, rm, writeFile } from "fs/promises";
 import { existsSync } from "fs";
 import { tmpdir } from "os";
 import { runCLI } from "./fixtures/run-cli.js";
-
-const exec = promisify(execFile);
 
 // ---------------------------------------------------------------------------
 // Workspace helpers
@@ -65,11 +61,11 @@ async function writeSchemaFile(root: string, schema: object): Promise<string> {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("schema integration tests", () => {
-  beforeAll(async () => {
-    await exec("npx", ["tsup"], { cwd: path.resolve(".") });
-  }, 30_000);
+// dist/cli.js is built once via vitest globalSetup (see test/global-setup.ts).
+// Per-file beforeAll(npx tsup) calls were removed to avoid the parallel-worker
+// race that PR #21 fixed — tsup's clean step would wipe dist/cli.js mid-test.
 
+describe("schema integration tests", () => {
   // -------------------------------------------------------------------------
   // schema init
   // -------------------------------------------------------------------------
@@ -198,7 +194,10 @@ describe("schema integration tests", () => {
       await writeFile(path.join(conceptsDir, "simple-concept.md"), content, "utf-8");
 
       const result = await runCLI(["lint"], cwd);
-      expect(result.stdout).not.toContain("schema-cross-link-minimum");
+      // Concept pages default to minWikilinks: 0, so no cross-link warning fires.
+      // Assert on the actual warning message text (not the rule name, which the
+      // CLI does not print) so a regression would be caught reliably.
+      expect(result.stdout).not.toContain("requires at least");
     } finally {
       await cleanupDir(cwd);
     }
