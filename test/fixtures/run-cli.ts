@@ -10,6 +10,7 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 import { access } from "fs/promises";
 import path from "path";
+import { expect } from "vitest";
 
 const exec = promisify(execFile);
 
@@ -34,8 +35,9 @@ export interface CLIResult {
 }
 
 /**
- * Format a CLIResult into a multi-line diagnostic string. Callers should
- * include this in assertion failure messages so CI logs capture everything.
+ * Format a CLIResult into a multi-line diagnostic string. Included in
+ * assertion failure messages by {@link expectCLIExit} so CI logs capture
+ * everything without rerunning.
  * @param result - The CLIResult to format.
  * @returns Multi-line diagnostic string.
  */
@@ -53,11 +55,37 @@ export function formatCLIFailure(result: CLIResult): string {
 }
 
 /**
+ * Assert that a CLIResult exited with the expected code. On mismatch, the
+ * assertion message includes the full subprocess diagnostics so CI logs
+ * reveal what actually happened without needing to rerun.
+ * @param result - The CLIResult to check.
+ * @param expectedCode - Expected exit code (use 0 for success).
+ */
+export function expectCLIExit(result: CLIResult, expectedCode: number): void {
+  expect(
+    result.code,
+    `CLI exited ${result.code}, expected ${expectedCode}:\n${formatCLIFailure(result)}`,
+  ).toBe(expectedCode);
+}
+
+/**
+ * Assert that a CLIResult exited with any non-zero code (i.e. failed).
+ * Includes full subprocess diagnostics on mismatch.
+ * @param result - The CLIResult to check.
+ */
+export function expectCLIFailure(result: CLIResult): void {
+  expect(
+    result.code,
+    `CLI unexpectedly exited 0, expected non-zero:\n${formatCLIFailure(result)}`,
+  ).not.toBe(0);
+}
+
+/**
  * Run the llmwiki CLI with the given arguments and return its output +
- * rich diagnostics. Never throws — non-zero exits and spawn errors are
- * captured into the returned CLIResult.
+ * rich diagnostics. Never throws — non-zero exits, spawn errors, and
+ * missing-cwd errors are all captured into the returned CLIResult.
  * @param args - CLI arguments to pass after `node dist/cli.js`.
- * @param cwd - Working directory for the subprocess. Must exist.
+ * @param cwd - Working directory for the subprocess.
  * @param envOverrides - Optional environment variable overrides.
  */
 export async function runCLI(
@@ -65,11 +93,12 @@ export async function runCLI(
   cwd: string,
   envOverrides: NodeJS.ProcessEnv = {},
 ): Promise<CLIResult> {
-  // Guard against the temp-dir race: if cwd doesn't exist yet, the subprocess
-  // will fail in a way that's hard to diagnose. Surface it explicitly.
-  await access(cwd);
-
   try {
+    // Guard against the temp-dir race: if cwd isn't visible yet, the
+    // subprocess error is hard to read. Check inside the try so we surface
+    // it via the normal CLIResult shape instead of as a raw throw.
+    await access(cwd);
+
     const { stdout, stderr } = await exec("node", [CLI, ...args], {
       cwd,
       env: { ...process.env, ...envOverrides },

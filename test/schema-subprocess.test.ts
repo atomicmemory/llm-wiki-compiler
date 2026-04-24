@@ -24,7 +24,7 @@ import { describe, it, expect } from "vitest";
 import path from "path";
 import { mkdir, rm, writeFile } from "fs/promises";
 import { tmpdir } from "os";
-import { runCLI } from "./fixtures/run-cli.js";
+import { runCLI, expectCLIExit } from "./fixtures/run-cli.js";
 import type { ReviewCandidate } from "../src/utils/types.js";
 import type { LintResult } from "../src/linter/types.js";
 
@@ -128,7 +128,7 @@ describe("schema subprocess tests", () => {
       };
 
       const result = await runReviewShow(cwd, candidate);
-      expect(result.code).toBe(0);
+      expectCLIExit(result, 0);
       // The header() helper wraps text in ANSI bold codes but the raw text is present
       expect(result.stdout).toContain("Schema violations");
       expect(result.stdout).toContain("requires at least 3");
@@ -156,7 +156,7 @@ describe("schema subprocess tests", () => {
       };
 
       const result = await runReviewShow(cwd, candidate);
-      expect(result.code).toBe(0);
+      expectCLIExit(result, 0);
       expect(result.stdout).not.toContain("Schema violations");
     } finally {
       await cleanupDir(cwd);

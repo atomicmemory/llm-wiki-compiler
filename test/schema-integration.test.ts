@@ -12,7 +12,7 @@ import path from "path";
 import { mkdir, readFile, rm, writeFile } from "fs/promises";
 import { existsSync } from "fs";
 import { tmpdir } from "os";
-import { runCLI } from "./fixtures/run-cli.js";
+import { runCLI, expectCLIExit } from "./fixtures/run-cli.js";
 
 // ---------------------------------------------------------------------------
 // Workspace helpers
@@ -74,7 +74,7 @@ describe("schema integration tests", () => {
     const cwd = await makeTmpDir("init-fresh");
     try {
       const result = await runCLI(["schema", "init"], cwd);
-      expect(result.code).toBe(0);
+      expectCLIExit(result, 0);
 
       const schemaPath = path.join(cwd, ".llmwiki", "schema.json");
       expect(existsSync(schemaPath)).toBe(true);
@@ -99,7 +99,7 @@ describe("schema integration tests", () => {
       const result = await runCLI(["schema", "init"], cwd);
 
       // Should exit 0 but warn, not overwrite
-      expect(result.code).toBe(0);
+      expectCLIExit(result, 0);
       const after = await readFile(path.join(cwd, ".llmwiki", "schema.json"), "utf-8");
       expect(after).toBe(before);
       expect(result.stdout).toContain("already exists");
@@ -116,7 +116,7 @@ describe("schema integration tests", () => {
     const cwd = await makeTmpDir("show-defaults");
     try {
       const result = await runCLI(["schema", "show"], cwd);
-      expect(result.code).toBe(0);
+      expectCLIExit(result, 0);
       // Output should contain known default kind names
       expect(result.stdout).toContain("concept");
       expect(result.stdout).toContain("overview");
@@ -137,7 +137,7 @@ describe("schema integration tests", () => {
       const schemaPath = await writeSchemaFile(cwd, customSchema);
 
       const result = await runCLI(["schema", "show"], cwd);
-      expect(result.code).toBe(0);
+      expectCLIExit(result, 0);
       // Must mention the file path so user knows which schema is in effect
       expect(result.stdout).toContain(schemaPath);
       // Should surface the overridden kind value
@@ -214,7 +214,7 @@ describe("schema integration tests", () => {
       });
 
       const result = await runCLI(["lint"], cwd);
-      expect(result.code).toBe(0);
+      expectCLIExit(result, 0);
       // The lint command prints "Schema: <path>" so the user knows what's in effect
       expect(result.stdout).toContain(schemaPath);
     } finally {
