@@ -165,6 +165,8 @@ describe("schema integration tests", () => {
       await writeOverviewPage(cwd, 1);
 
       const result = await runCLI(["lint"], cwd);
+      // lint exits non-zero when findings exist; we expect a finding here
+      expectCLIExit(result, 1);
       // The lint output prints the human-readable message, not the rule name
       expect(result.stdout).toContain("overview");
       expect(result.stdout).toContain("requires at least");
@@ -194,6 +196,7 @@ describe("schema integration tests", () => {
       await writeFile(path.join(conceptsDir, "simple-concept.md"), content, "utf-8");
 
       const result = await runCLI(["lint"], cwd);
+      expectCLIExit(result, 0);
       // Concept pages default to minWikilinks: 0, so no cross-link warning fires.
       // Assert on the actual warning message text (not the rule name, which the
       // CLI does not print) so a regression would be caught reliably.

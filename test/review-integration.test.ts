@@ -11,15 +11,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { execFile } from "child_process";
-import { promisify } from "util";
 import path from "path";
 import { mkdir, rm, writeFile, readdir, access } from "fs/promises";
 import { tmpdir } from "os";
 import type { ReviewCandidate } from "../src/utils/types.js";
-import { runCLI, expectCLIExit, expectCLIFailure, CLI } from "./fixtures/run-cli.js";
+import { runCLI, expectCLIExit, expectCLIFailure } from "./fixtures/run-cli.js";
 
-const exec = promisify(execFile);
 
 // ---------------------------------------------------------------------------
 // Helpers
