@@ -20,6 +20,7 @@ import { buildPagePrompt } from "./prompts.js";
 import { addObsidianMeta } from "./obsidian.js";
 import { addProvenanceMeta, reportContradictionWarnings } from "./provenance.js";
 import { CONCEPTS_DIR } from "../utils/constants.js";
+import type { SchemaConfig } from "../schema/index.js";
 import type { ExtractedConcept } from "../utils/types.js";
 
 /** Maximum number of existing concept pages to include as cross-reference context. */
@@ -38,11 +39,13 @@ interface RenderableConcept {
  * the LLM with cross-referencing context from existing concept pages.
  * @param root - Project root directory.
  * @param entry - The merged concept to render.
+ * @param schema - Resolved schema config, used to stamp `kind` on frontmatter.
  * @returns Full markdown content (frontmatter + body, trailing newline).
  */
 export async function renderMergedPageContent(
   root: string,
   entry: RenderableConcept,
+  schema: SchemaConfig,
 ): Promise<string> {
   const pagePath = path.join(root, CONCEPTS_DIR, `${entry.slug}.md`);
   const existingPage = await safeReadFile(pagePath);
@@ -62,13 +65,20 @@ export async function renderMergedPageContent(
     ],
   });
 
-  const frontmatter = buildMergedFrontmatter(entry, existingPage);
+  const frontmatter = buildMergedFrontmatter(entry, existingPage, schema);
   reportContradictionWarnings(entry.concept.concept, entry.concept);
   return `${frontmatter}\n\n${pageBody}\n`;
 }
 
-/** Construct the frontmatter block for a merged concept, preserving createdAt. */
-function buildMergedFrontmatter(entry: RenderableConcept, existingPage: string): string {
+/**
+ * Construct the frontmatter block for a merged concept, preserving createdAt
+ * and stamping the `kind` field from the schema's default kind.
+ */
+function buildMergedFrontmatter(
+  entry: RenderableConcept,
+  existingPage: string,
+  schema: SchemaConfig,
+): string {
   const now = new Date().toISOString();
   const existing = existingPage ? parseFrontmatter(existingPage) : null;
   const createdAt = (existing?.meta.createdAt && typeof existing.meta.createdAt === "string")
@@ -78,6 +88,7 @@ function buildMergedFrontmatter(entry: RenderableConcept, existingPage: string):
     title: entry.concept.concept,
     summary: entry.concept.summary,
     sources: entry.sourceFiles,
+    kind: schema.defaultKind,
     createdAt,
     updatedAt: now,
   };

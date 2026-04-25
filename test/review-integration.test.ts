@@ -11,15 +11,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { execFile } from "child_process";
-import { promisify } from "util";
 import path from "path";
 import { mkdir, rm, writeFile, readdir, access } from "fs/promises";
 import { tmpdir } from "os";
 import type { ReviewCandidate } from "../src/utils/types.js";
+import { runCLI, expectCLIExit, expectCLIFailure } from "./fixtures/run-cli.js";
 
-const exec = promisify(execFile);
-const CLI = path.resolve("dist/cli.js");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -79,24 +76,6 @@ function buildValidPageBody(title: string, summary: string): string {
   ].join("\n");
 }
 
-/** Run a CLI subcommand in cwd and return stdout+stderr regardless of exit. */
-async function runCLI(
-  args: string[],
-  cwd: string,
-  envOverrides: NodeJS.ProcessEnv = {},
-): Promise<{ stdout: string; stderr: string; code: number }> {
-  try {
-    const { stdout, stderr } = await exec("node", [CLI, ...args], {
-      cwd,
-      env: { ...process.env, ...envOverrides },
-    });
-    return { stdout, stderr, code: 0 };
-  } catch (err: unknown) {
-    const e = err as { stdout?: string; stderr?: string; code?: number };
-    return { stdout: e.stdout ?? "", stderr: e.stderr ?? "", code: e.code ?? 1 };
-  }
-}
-
 /**
  * Assert that a review subcommand exits non-zero and prints "not found" when
  * given an id that does not correspond to any candidate file.
@@ -105,7 +84,7 @@ async function assertMissingIdFails(subcommand: string, suffix: string): Promise
   const cwd = await makeTempWorkspace(suffix);
   try {
     const result = await runCLI(["review", subcommand, "does-not-exist-00000000"], cwd);
-    expect(result.code).not.toBe(0);
+    expectCLIFailure(result);
     expect(result.stdout).toContain("not found");
   } finally {
     await cleanupDir(cwd);
@@ -125,7 +104,7 @@ describe("review integration tests", () => {
     const cwd = await makeTempWorkspace("compile-help-review-flag");
     try {
       const result = await runCLI(["compile", "--help"], cwd);
-      expect(result.code).toBe(0);
+      expectCLIExit(result, 0);
       expect(result.stdout).toContain("--review");
     } finally {
       await cleanupDir(cwd);
@@ -143,7 +122,7 @@ describe("review integration tests", () => {
         ANTHROPIC_API_KEY: "",
         ANTHROPIC_AUTH_TOKEN: "",
       });
-      expect(result.code).not.toBe(0);
+      expectCLIFailure(result);
       expect(result.stderr).toContain("Error:");
     } finally {
       await cleanupDir(cwd);
@@ -158,7 +137,7 @@ describe("review integration tests", () => {
     const cwd = await makeTempWorkspace("review-list-empty");
     try {
       const result = await runCLI(["review", "list"], cwd);
-      expect(result.code).toBe(0);
+      expectCLIExit(result, 0);
       expect(result.stdout.toLowerCase()).toContain("no pending");
     } finally {
       await cleanupDir(cwd);
@@ -198,7 +177,7 @@ describe("review integration tests", () => {
     try {
       const candidate = await writeCandidateFixture(cwd);
       const result = await runCLI(["review", "list"], cwd);
-      expect(result.code).toBe(0);
+      expectCLIExit(result, 0);
       expect(result.stdout).toContain(candidate.id);
     } finally {
       await cleanupDir(cwd);
@@ -213,7 +192,7 @@ describe("review integration tests", () => {
         summary: "How semantic indexes are built.",
       });
       const result = await runCLI(["review", "show", candidate.id], cwd);
-      expect(result.code).toBe(0);
+      expectCLIExit(result, 0);
       expect(result.stdout).toContain("Semantic Indexing");
       expect(result.stdout).toContain("How semantic indexes are built.");
     } finally {
@@ -227,7 +206,7 @@ describe("review integration tests", () => {
       const candidate = await writeCandidateFixture(cwd);
 
       const rejectResult = await runCLI(["review", "reject", candidate.id], cwd);
-      expect(rejectResult.code).toBe(0);
+      expectCLIExit(rejectResult, 0);
 
       // Candidate no longer appears in list
       const listResult = await runCLI(["review", "list"], cwd);
@@ -262,7 +241,7 @@ describe("review integration tests", () => {
 
       const approveResult = await runCLI(["review", "approve", candidate.id], cwd);
       // Exit code 0 — embeddings warning is tolerated by design in approve
-      expect(approveResult.code).toBe(0);
+      expectCLIExit(approveResult, 0);
 
       // Wiki page written
       const pagePath = path.join(cwd, "wiki", "concepts", `${candidate.slug}.md`);
