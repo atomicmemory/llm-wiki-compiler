@@ -103,6 +103,15 @@ export OLLAMA_HOST=http://ollama_host:11434/v1
 export OLLAMA_EMBEDDINGS_HOST=http://ollama_host:11435/v1
 ```
 
+### Request timeouts
+
+The OpenAI SDK defaults to a 10-minute per-request timeout, which can cut off long compile-time completions on slower local models. Override per provider:
+
+- `LLMWIKI_REQUEST_TIMEOUT_MS` — provider-agnostic timeout in milliseconds. Applies to both the `openai` and `ollama` backends.
+- `OLLAMA_TIMEOUT_MS` — Ollama-specific override. Wins over `LLMWIKI_REQUEST_TIMEOUT_MS` when both are set.
+
+Defaults: 10 minutes for `openai`, 30 minutes for `ollama` (local models commonly need more).
+
 ## Why not just RAG?
 
 RAG retrieves chunks at query time. Every question re-discovers the same relationships from scratch. Nothing accumulates.

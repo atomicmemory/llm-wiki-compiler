@@ -34,6 +34,20 @@ export const PROVIDER_MODELS: Record<string, string> = {
 /** Default Ollama API base URL. */
 export const OLLAMA_DEFAULT_HOST = "http://localhost:11434/v1";
 
+/**
+ * Default request timeout for cloud OpenAI-compatible providers (10 minutes).
+ * Matches the OpenAI SDK's own default; called out here so it's explicit.
+ */
+export const OPENAI_DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
+
+/**
+ * Default request timeout for Ollama (30 minutes). Local models on modest
+ * hardware can take well over the cloud-provider default for a single
+ * compile-time completion. Configurable via LLMWIKI_REQUEST_TIMEOUT_MS or
+ * OLLAMA_TIMEOUT_MS env vars.
+ */
+export const OLLAMA_DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
+
 /** Directory names relative to the project root. */
 export const SOURCES_DIR = "sources";
 export const CONCEPTS_DIR = "wiki/concepts";
