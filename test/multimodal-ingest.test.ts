@@ -6,6 +6,7 @@
  *   - frontmatter records sourceType per type
  *   - happy paths for transcript parsers (.vtt, .srt, .txt)
  *   - PDF title resolution (preserves Info.Title, falls back to filename)
+ *   - requireNode20ForPdf throws a clear error when Node version is below 20
  *   - image ingest surfaces a clear error when the active provider is non-vision
  *   - YouTube URL detection routes to the transcript handler
  *
@@ -20,7 +21,7 @@ import os from "os";
 import { detectSourceType, buildDocument, enforceCharLimit } from "../src/commands/ingest.js";
 import { parseFrontmatter } from "../src/utils/markdown.js";
 import ingestTranscript, { isYoutubeUrl } from "../src/ingest/transcript.js";
-import { resolveTitle } from "../src/ingest/pdf.js";
+import { resolveTitle, requireNode20ForPdf } from "../src/ingest/pdf.js";
 import ingestImage from "../src/ingest/image.js";
 
 const tempDirsToCleanup: string[] = [];
@@ -179,6 +180,29 @@ describe("PDF ingest helpers", () => {
   it("resolveTitle ignores empty Info.Title", () => {
     const title = resolveTitle("/tmp/spec.pdf", { Title: "   " });
     expect(title).toBe("spec");
+  });
+});
+
+describe("requireNode20ForPdf runtime check", () => {
+  it("throws a clear error when the Node.js major version is below 20", () => {
+    const original = process.version;
+    Object.defineProperty(process, "version", { value: "v18.20.8", configurable: true });
+    try {
+      expect(() => requireNode20ForPdf()).toThrow(/PDF ingest requires Node\.js 20/);
+      expect(() => requireNode20ForPdf()).toThrow(/v18\.20\.8/);
+    } finally {
+      Object.defineProperty(process, "version", { value: original, configurable: true });
+    }
+  });
+
+  it("does not throw when running on Node 20+", () => {
+    const original = process.version;
+    Object.defineProperty(process, "version", { value: "v20.16.0", configurable: true });
+    try {
+      expect(() => requireNode20ForPdf()).not.toThrow();
+    } finally {
+      Object.defineProperty(process, "version", { value: original, configurable: true });
+    }
   });
 });
 

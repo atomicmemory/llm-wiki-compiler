@@ -32,6 +32,10 @@ import { tmpdir } from "os";
 const exec = promisify(execFile);
 const CLI = path.resolve("dist/cli.js");
 
+/** PDF ingest requires Node 20+ (pdfjs-dist uses DOMMatrix, unavailable in Node 18). */
+const nodeMajor = parseInt(process.version.slice(1).split(".")[0], 10);
+const isPdfCapable = nodeMajor >= 20;
+
 /** Minimal valid PDF with the text "Hello PDF World". */
 const MINIMAL_PDF_CONTENT = `%PDF-1.4
 1 0 obj
@@ -182,7 +186,7 @@ describe("multimodal ingest CLI integration", () => {
     expect(markdown).toContain("Bob: Hello back.");
   }, 15_000);
 
-  it("ingest a .pdf writes markdown with sourceType pdf and extracted text", async () => {
+  it.skipIf(!isPdfCapable)("ingest a .pdf writes markdown with sourceType pdf and extracted text", async () => {
     const workspace = await makeWorkspace("sample.pdf", MINIMAL_PDF_CONTENT);
     const { stdout, markdown } = await runIngest(workspace);
     expect(stdout).toContain("Next: llmwiki compile");
@@ -224,7 +228,7 @@ describe("multimodal ingest CLI integration", () => {
     await assertExtensionRouting("clip.srt", SRT_CONTENT, "transcript");
   }, 15_000);
 
-  it("source-type detection routes .pdf by extension through the full CLI", async () => {
+  it.skipIf(!isPdfCapable)("source-type detection routes .pdf by extension through the full CLI", async () => {
     await assertExtensionRouting("report.pdf", MINIMAL_PDF_CONTENT, "pdf");
   }, 15_000);
 });
