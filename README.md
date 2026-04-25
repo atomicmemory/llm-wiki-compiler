@@ -145,6 +145,7 @@ A raw source like a Wikipedia article on knowledge compilation becomes a structu
 ---
 title: Knowledge Compilation
 summary: Techniques for converting knowledge representations into forms that support efficient reasoning.
+kind: concept
 sources:
   - knowledge-compilation.md
 createdAt: "2026-04-05T12:00:00Z"
@@ -159,7 +160,7 @@ a knowledge base into a target language that supports efficient queries.
 Related concepts: [[Propositional Logic]], [[Model Counting]]
 ```
 
-Pages include source attribution in frontmatter. Paragraphs are annotated with `^[filename.md]` markers pointing back to the source file that contributed the content.
+Pages include source attribution in frontmatter. Paragraphs are annotated with `^[filename.md]` markers pointing back to the source file that contributed the content; specific claims can use line ranges like `^[filename.md:42-58]` or `^[filename.md#L42-L58]`.
 
 ## Commands
 
@@ -172,6 +173,8 @@ Pages include source attribution in frontmatter. Paragraphs are annotated with `
 | `llmwiki review show <id>` | Print a candidate's title, summary, and body |
 | `llmwiki review approve <id>` | Promote a candidate into `wiki/` and refresh index/MOC/embeddings |
 | `llmwiki review reject <id>` | Archive a candidate without touching `wiki/` |
+| `llmwiki schema init` | Write a starter `.llmwiki/schema.json` file |
+| `llmwiki schema show` | Print the resolved schema for the current project |
 | `llmwiki query "question"` | Ask questions against your compiled wiki |
 | `llmwiki query "question" --save` | Answer and save the result as a wiki page |
 | `llmwiki lint` | Check wiki quality (broken links, orphans, empty pages, low confidence, contradictions, etc.) |
@@ -186,6 +189,7 @@ wiki/
   queries/          saved query answers, included in index and retrieval
   index.md          auto-generated table of contents
 .llmwiki/
+  schema.json       optional page-kind and cross-link policy
   candidates/       pending review candidates from `compile --review`
   candidates/archive/  rejected candidates kept for audit
 ```
@@ -236,6 +240,41 @@ When multiple sources merge into one slug, metadata is reconciled: `min` confide
 - `low-confidence` — flags pages with `confidence` below a threshold
 - `contradicted-page` — flags pages with non-empty `contradictedBy`
 - `excess-inferred-paragraphs` — flags pages with too many inferred paragraphs without citations
+
+## Claim-level provenance
+
+Paragraph citations continue to use the original source-marker form:
+
+```markdown
+This paragraph is grounded in the source. ^[source.md]
+```
+
+For claims that need tighter verification, pages can pin a statement to a line range in the ingested source:
+
+```markdown
+The system uses a two-phase compile pipeline. ^[architecture-notes.md:42-58]
+The same range can also use GitHub-style anchors. ^[architecture-notes.md#L42-L58]
+```
+
+`llmwiki lint` validates both forms. It reports missing source files, malformed claim citations, impossible ranges like line `0` or `8-3`, and ranges that extend past the end of the source file.
+
+## Schema layer
+
+Projects can optionally define `.llmwiki/schema.json` to shape the wiki beyond flat concept pages. Existing projects do not need a schema file; missing or invalid `kind` values fall back to `concept`.
+
+```bash
+llmwiki schema init
+llmwiki schema show
+```
+
+The schema supports four page kinds:
+
+- `concept` — standalone idea or pattern
+- `entity` — specific person, product, organization, or named artifact
+- `comparison` — side-by-side analysis across concepts or entities
+- `overview` — map page that connects several concepts in a domain
+
+Schema rules can set per-kind `minWikilinks` and optional `seedPages`. Compile can materialize seed pages such as overviews, lint enforces page-kind-specific cross-link minimums, and review candidates surface schema violations before approval.
 
 ## Demo
 
@@ -331,6 +370,11 @@ Karpathy describes an abstract pattern for turning raw data into compiled knowle
 
 ## Roadmap
 
+Shipped in 0.4.0:
+
+- ✅ Claim-level provenance with source ranges
+- ✅ First-class schema layer with typed page kinds (`concept`, `entity`, `comparison`, `overview`)
+
 Shipped in 0.3.0:
 
 - ✅ Candidate review queue (approve compile output before pages are written)
@@ -347,14 +391,12 @@ Shipped in 0.2.0:
 
 Next up:
 
-- Claim-level provenance with source ranges
-- First-class schema layer with typed page kinds (`concept`, `entity`, `comparison`, `overview`)
 - Multimodal ingest (images, PDFs, transcripts)
 - Chunked retrieval with reranking
 - Export bundle (`llms.txt`, JSON, JSON-LD, GraphML, Marp)
 - Session-history adapters (Claude, Codex, Cursor exports)
 
-If you like ambitious problems: **schema layer + typed page kinds**, **claim-level provenance**, and **chunked retrieval with reranking** are the meatiest. Open an issue to claim one or kick off a design discussion.
+If you like ambitious problems: **multimodal ingest**, **chunked retrieval with reranking**, and **export bundles** are the meatiest. Open an issue to claim one or kick off a design discussion.
 
 ## Requirements
 

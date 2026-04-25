@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-04-25
+
+Adds claim-level source-range provenance, a first-class schema layer for typed page kinds, configurable provider request timeouts, and a slug-based wikilink format that resolves reliably in Obsidian.
+
+### Added
+
+- **Claim-level provenance with source ranges** — citations can now pin specific lines: `^[paper.md:42-58]` (colon form) or `^[paper.md#L42-L58]` (GitHub anchor form). Single-line `^[paper.md:7]` works too, as do mixed multi-source markers like `^[a.md, b.md:1-3]`. The legacy paragraph form `^[paper.md]` continues to work unchanged.
+- **`extractClaimCitations(body)`** returns structured `{ raw, spans: [{ file, lines? }] }` records for tooling. **`inspectProvenance(body)`** groups spans by source file (deduped), useful for "this page draws from" UIs.
+- **`checkBrokenCitations`** lint rule now flags out-of-bounds spans (e.g. `^[src.md:42-58]` against a 3-line source) with cached per-file line counts so a page with many spans into the same source only reads it once.
+- **`checkMalformedClaimCitations`** new lint rule catches malformed entries: non-numeric ranges (`:abc-xyz`), half-baked hash forms (`#X9`), line `0`, and reversed ranges (`5-3`). Semantic invalidity is rejected at parse time so `extractClaimCitations` doesn't return impossible spans.
+- **First-class schema layer** for typed page kinds. Projects can declare `.llmwiki/schema.json|yaml|yml` (or `wiki/.schema.yaml|yml`) defining page kinds (`concept`, `entity`, `comparison`, `overview`), per-kind `minWikilinks`, and seed pages.
+- **`llmwiki schema init`** writes a starter schema file. **`llmwiki schema show`** prints the resolved schema and its source path.
+- **`schema-cross-link-minimum`** lint rule enforces per-kind link expectations.
+- **Schema-driven seed pages** are generated during compile and run on the early-return path too, so adding a seed-page entry triggers its creation on the next `compile` even when no source files changed.
+- **Review-mode schema violations** — `compile --review` runs in-memory schema lint per candidate and stamps any violations onto the candidate JSON. `review show <id>` prints a "Schema violations" block when present.
+- **Configurable provider request timeouts** — `LLMWIKI_REQUEST_TIMEOUT_MS` (provider-agnostic) and `OLLAMA_TIMEOUT_MS` (Ollama-specific) override the per-request timeout. Defaults: 10 minutes for OpenAI (matches the SDK), 30 minutes for Ollama (better suited to local models).
+- **Slug-based wikilinks** — index, MOC, and the in-body wikilink resolver now emit `[[slug|Title]]` so Obsidian targets the file directly regardless of whether the slug differs from the display title.
+- **Test infrastructure for subprocess CLI tests** — `runCLI`/`expectCLIExit`/`expectCLIFailure`/`formatCLIFailure` helpers in `test/fixtures/run-cli.ts` capture full subprocess diagnostics (code, signal, killed, message, stdout, stderr, args, cwd) so flakes surface their root cause without rerunning. dist/ is built once via `vitest globalSetup` so parallel workers don't race on `tsup --clean`.
+
+### Changed
+
+- `extractCitations(body)` continues to return a flat filename list for backward compatibility, but is now backed by `extractClaimCitations` and strips span suffixes when collecting filenames.
+- `WikiFrontmatter.kind` references the canonical `PageKind` type from `src/schema/types.ts` via `import type` (no runtime cycle).
+- `compile --review` defers seed-page generation and `finalizeWiki` to honor the no-`wiki/`-mutation contract.
+
+### Contributors
+
+Thanks to **@ludevica** for #15 (slug-based wikilinks) and **@BenGSt** for reporting the Ollama timeout (#11).
+
 ## [0.3.0] - 2026-04-23
 
 Adds a candidate review queue for `compile` and richer epistemic metadata on compiled pages.
