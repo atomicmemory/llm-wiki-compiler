@@ -9,6 +9,7 @@
 import { lint } from "../linter/index.js";
 import * as output from "../utils/output.js";
 import type { LintResult } from "../linter/types.js";
+import { loadSchema } from "../schema/index.js";
 
 /** Map severity levels to output formatting functions. */
 const SEVERITY_FORMATTERS: Record<LintResult["severity"], (text: string) => string> = {
@@ -38,6 +39,10 @@ function printResult(result: LintResult): void {
  */
 export default async function lintCommand(): Promise<void> {
   output.header("Linting wiki");
+
+  const schema = await loadSchema(process.cwd());
+  const schemaSource = schema.loadedFrom ?? "defaults (no schema file)";
+  output.status("i", output.dim(`Schema: ${schemaSource}`));
 
   const summary = await lint(process.cwd());
 
