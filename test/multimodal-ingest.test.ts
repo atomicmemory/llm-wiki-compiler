@@ -42,37 +42,57 @@ afterEach(async () => {
 });
 
 describe("detectSourceType", () => {
-  it("routes .pdf paths to pdf", () => {
-    expect(detectSourceType("/tmp/report.pdf")).toBe("pdf");
-    expect(detectSourceType("./docs/spec.PDF")).toBe("pdf");
+  it("routes .pdf paths to pdf", async () => {
+    expect(await detectSourceType("/tmp/report.pdf")).toBe("pdf");
+    expect(await detectSourceType("./docs/spec.PDF")).toBe("pdf");
   });
 
-  it("routes image extensions to image", () => {
-    expect(detectSourceType("/tmp/photo.png")).toBe("image");
-    expect(detectSourceType("/tmp/photo.jpg")).toBe("image");
-    expect(detectSourceType("/tmp/photo.JPEG")).toBe("image");
-    expect(detectSourceType("/tmp/anim.gif")).toBe("image");
-    expect(detectSourceType("/tmp/pic.webp")).toBe("image");
+  it("routes image extensions to image", async () => {
+    expect(await detectSourceType("/tmp/photo.png")).toBe("image");
+    expect(await detectSourceType("/tmp/photo.jpg")).toBe("image");
+    expect(await detectSourceType("/tmp/photo.JPEG")).toBe("image");
+    expect(await detectSourceType("/tmp/anim.gif")).toBe("image");
+    expect(await detectSourceType("/tmp/pic.webp")).toBe("image");
   });
 
-  it("routes transcript extensions to transcript", () => {
-    expect(detectSourceType("/tmp/lecture.vtt")).toBe("transcript");
-    expect(detectSourceType("/tmp/movie.srt")).toBe("transcript");
-    expect(detectSourceType("/tmp/notes.txt")).toBe("transcript");
+  it("routes .vtt and .srt to transcript by extension (no content sniff)", async () => {
+    expect(await detectSourceType("/tmp/lecture.vtt")).toBe("transcript");
+    expect(await detectSourceType("/tmp/movie.srt")).toBe("transcript");
   });
 
-  it("routes .md to file", () => {
-    expect(detectSourceType("/tmp/notes.md")).toBe("file");
+  it("routes .txt with speaker tags to transcript via content sniff", async () => {
+    const filePath = await makeTempFile("chat.txt", "Alice: Hi.\nBob: Hello.");
+    expect(await detectSourceType(filePath)).toBe("transcript");
   });
 
-  it("routes generic http(s) URLs to web", () => {
-    expect(detectSourceType("https://example.com/article")).toBe("web");
-    expect(detectSourceType("http://example.com/post")).toBe("web");
+  it("routes .txt with repeated timestamps to transcript via content sniff", async () => {
+    const filePath = await makeTempFile(
+      "timed.txt",
+      "00:01 Line one.\n00:02 Line two.\n00:03 Line three.\n",
+    );
+    expect(await detectSourceType(filePath)).toBe("transcript");
   });
 
-  it("routes YouTube URLs to transcript", () => {
-    expect(detectSourceType("https://www.youtube.com/watch?v=abc123")).toBe("transcript");
-    expect(detectSourceType("https://youtu.be/abc123")).toBe("transcript");
+  it("routes plain-prose .txt with no transcript signals to file", async () => {
+    const filePath = await makeTempFile(
+      "notes.txt",
+      "This is a plain prose note with no speaker tags or timestamps.\n",
+    );
+    expect(await detectSourceType(filePath)).toBe("file");
+  });
+
+  it("routes .md to file", async () => {
+    expect(await detectSourceType("/tmp/notes.md")).toBe("file");
+  });
+
+  it("routes generic http(s) URLs to web", async () => {
+    expect(await detectSourceType("https://example.com/article")).toBe("web");
+    expect(await detectSourceType("http://example.com/post")).toBe("web");
+  });
+
+  it("routes YouTube URLs to transcript", async () => {
+    expect(await detectSourceType("https://www.youtube.com/watch?v=abc123")).toBe("transcript");
+    expect(await detectSourceType("https://youtu.be/abc123")).toBe("transcript");
   });
 });
 

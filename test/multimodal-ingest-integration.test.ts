@@ -10,6 +10,7 @@
  *  - VTT transcript: written with sourceType transcript, timestamps preserved
  *  - SRT transcript: written with sourceType transcript, timestamps preserved
  *  - Plain-text transcript with speaker tags: routes to transcript adapter
+ *  - Plain-text prose without transcript signals: routes to file adapter
  *  - PDF: written with sourceType pdf, text extracted
  *  - Image without credentials: exits non-zero with actionable error message
  *  - Extension routing verified end-to-end for .vtt, .srt, and .pdf
@@ -23,14 +24,10 @@
  */
 
 import { describe, it, expect, afterEach } from "vitest";
-import { execFile } from "child_process";
-import { promisify } from "util";
 import path from "path";
 import { mkdtemp, rm, readdir, readFile, writeFile } from "fs/promises";
 import { tmpdir } from "os";
-
-const exec = promisify(execFile);
-const CLI = path.resolve("dist/cli.js");
+import { runCLI, expectCLIExit, expectCLIFailure, formatCLIFailure } from "./fixtures/run-cli.js";
 
 /** PDF ingest requires Node 20+ (pdfjs-dist uses DOMMatrix, unavailable in Node 18). */
 const nodeMajor = parseInt(process.version.slice(1).split(".")[0], 10);
@@ -92,6 +89,7 @@ const SRT_CONTENT = [
 ].join("\n");
 
 const PLAIN_TRANSCRIPT_CONTENT = "Alice: Hi there.\nBob: Hello back.\n";
+const PLAIN_PROSE_CONTENT = "This is a plain prose note with no speaker tags or timestamps.\n";
 
 /** Isolated workspace with its own sources/ directory. */
 interface Workspace {
@@ -125,13 +123,14 @@ async function readIngestedMarkdown(cwd: string): Promise<string> {
   return readFile(path.join(sourcesDir, mdFile), "utf-8");
 }
 
-/** Run ingest on a fixture and return the written markdown. */
-async function runIngest(workspace: Workspace): Promise<{ stdout: string; markdown: string }> {
-  const { stdout } = await exec("node", [CLI, "ingest", workspace.fixturePath], {
-    cwd: workspace.cwd,
-  });
+/** Run ingest on a fixture and return the CLI result plus written markdown. */
+async function runIngest(
+  workspace: Workspace,
+): Promise<{ result: import("./fixtures/run-cli.js").CLIResult; markdown: string }> {
+  const result = await runCLI(["ingest", workspace.fixturePath], workspace.cwd);
+  expectCLIExit(result, 0);
   const markdown = await readIngestedMarkdown(workspace.cwd);
-  return { stdout, markdown };
+  return { result, markdown };
 }
 
 /** Assert that a transcript ingest emits correct frontmatter and content markers. */
@@ -141,21 +140,22 @@ async function assertTranscriptIngest(
   timestampMarker: string,
 ): Promise<void> {
   const workspace = await makeWorkspace(fixtureName, content);
-  const { stdout, markdown } = await runIngest(workspace);
-  expect(stdout).toContain("Next: llmwiki compile");
+  const { result, markdown } = await runIngest(workspace);
+  expect(result.stdout, formatCLIFailure(result)).toContain("Next: llmwiki compile");
   expect(markdown).toContain("sourceType: transcript");
   expect(markdown).toContain(timestampMarker);
   expect(markdown).toContain("Alice: Good morning.");
 }
 
-/** Assert that a file's extension routes to the given sourceType (and not another). */
+/** Assert that a file's extension routes to the given sourceType (and not "file"). */
 async function assertExtensionRouting(
   fixtureName: string,
   content: string | Buffer,
   expectedSourceType: string,
 ): Promise<void> {
   const workspace = await makeWorkspace(fixtureName, content);
-  await exec("node", [CLI, "ingest", workspace.fixturePath], { cwd: workspace.cwd });
+  const result = await runCLI(["ingest", workspace.fixturePath], workspace.cwd);
+  expectCLIExit(result, 0);
   const markdown = await readIngestedMarkdown(workspace.cwd);
   expect(markdown).toContain(`sourceType: ${expectedSourceType}`);
   expect(markdown).not.toContain("sourceType: file");
@@ -165,9 +165,10 @@ describe("multimodal ingest CLI integration", () => {
   // dist/cli.js is built once via vitest globalSetup (test/global-setup.ts)
 
   it("ingest --help shows help and exits 0", async () => {
-    const { stdout } = await exec("node", [CLI, "ingest", "--help"]);
-    expect(stdout).toContain("ingest");
-    expect(stdout).toContain("source");
+    const result = await runCLI(["ingest", "--help"], process.cwd());
+    expectCLIExit(result, 0);
+    expect(result.stdout, formatCLIFailure(result)).toContain("ingest");
+    expect(result.stdout, formatCLIFailure(result)).toContain("source");
   }, 15_000);
 
   it("ingest a .vtt transcript writes markdown with sourceType transcript", async () => {
@@ -186,10 +187,16 @@ describe("multimodal ingest CLI integration", () => {
     expect(markdown).toContain("Bob: Hello back.");
   }, 15_000);
 
+  it("ingest a plain-prose .txt with no transcript signals routes to file adapter", async () => {
+    const workspace = await makeWorkspace("notes.txt", PLAIN_PROSE_CONTENT);
+    const { markdown } = await runIngest(workspace);
+    expect(markdown).toContain("sourceType: file");
+  }, 15_000);
+
   it.skipIf(!isPdfCapable)("ingest a .pdf writes markdown with sourceType pdf and extracted text", async () => {
     const workspace = await makeWorkspace("sample.pdf", MINIMAL_PDF_CONTENT);
-    const { stdout, markdown } = await runIngest(workspace);
-    expect(stdout).toContain("Next: llmwiki compile");
+    const { result, markdown } = await runIngest(workspace);
+    expect(result.stdout, formatCLIFailure(result)).toContain("Next: llmwiki compile");
     expect(markdown).toContain("sourceType: pdf");
     expect(markdown).toContain("Hello PDF World");
   }, 15_000);
@@ -203,20 +210,16 @@ describe("multimodal ingest CLI integration", () => {
       "hex",
     );
     const workspace = await makeWorkspace("photo.png", minimalPng);
+    const result = await runCLI(["ingest", workspace.fixturePath], workspace.cwd, {
+      ANTHROPIC_API_KEY: "",
+      ANTHROPIC_AUTH_TOKEN: "",
+      LLMWIKI_PROVIDER: "ollama",
+    });
 
-    try {
-      await exec("node", [CLI, "ingest", workspace.fixturePath], {
-        cwd: workspace.cwd,
-        env: { ...process.env, ANTHROPIC_API_KEY: "", ANTHROPIC_AUTH_TOKEN: "", LLMWIKI_PROVIDER: "ollama" },
-      });
-      expect.fail("should have exited non-zero");
-    } catch (err: unknown) {
-      const error = err as { stderr?: string; stdout?: string; code?: number };
-      expect(error.code).not.toBe(0);
-      const combined = (error.stderr ?? "") + (error.stdout ?? "");
-      expect(combined).toMatch(/anthropic/i);
-      expect(combined).toMatch(/provider|vision/i);
-    }
+    expectCLIFailure(result);
+    const combined = result.stderr + result.stdout;
+    expect(combined, formatCLIFailure(result)).toMatch(/anthropic/i);
+    expect(combined, formatCLIFailure(result)).toMatch(/provider|vision/i);
   }, 15_000);
 
   it("source-type detection routes .vtt by extension through the full CLI", async () => {

@@ -62,8 +62,8 @@ export const EMBEDDINGS_FILE = ".llmwiki/embeddings.json";
 /** Supported image file extensions for vision-based ingest. */
 export const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp"]);
 
-/** Supported transcript file extensions. */
-export const TRANSCRIPT_EXTENSIONS = new Set([".vtt", ".srt", ".txt"]);
+/** Supported transcript file extensions (content-sniff .txt separately). */
+export const TRANSCRIPT_EXTENSIONS = new Set([".vtt", ".srt"]);
 
 /** Max tokens for image-description completions. */
 export const IMAGE_DESCRIBE_MAX_TOKENS = 2048;
