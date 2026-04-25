@@ -32,7 +32,7 @@ Adds claim-level source-range provenance, a first-class schema layer for typed p
 
 ### Contributors
 
-Thanks to **@ludevica** for #15 (slug-based wikilinks) and **@BenGSt** for reporting the Ollama timeout (#11).
+Thanks to **@ludevica** for #15 (slug-based wikilinks), **@BenGSt** for reporting the Ollama timeout (#11), and **@sy2ruto** for reporting the multi-source citation lint bug (#10) — the fix shipped in 0.3.0 via PR #19, the issue was closed this cycle.
 
 ## [0.3.0] - 2026-04-23
 
