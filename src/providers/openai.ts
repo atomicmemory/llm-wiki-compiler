@@ -26,7 +26,9 @@ interface OpenAIProviderOptions {
 
 /**
  * Read an integer-millisecond timeout from an env var. Returns undefined when
- * the env var is unset or non-numeric so the caller can fall back to a default.
+ * the env var is unset, empty, non-numeric, zero, or negative — so the caller
+ * silently falls back to the next source in its resolution chain (env-var
+ * typos like `OLLAMA_TIMEOUT_MS=30m` are not surfaced to the user).
  */
 export function readTimeoutEnv(name: string): number | undefined {
   const raw = process.env[name]?.trim();
