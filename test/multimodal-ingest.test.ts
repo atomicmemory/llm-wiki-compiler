@@ -5,6 +5,7 @@
  *   - source-type detection routes paths to the right ingest module
  *   - frontmatter records sourceType per type
  *   - happy paths for transcript parsers (.vtt, .srt, .txt)
+ *   - tightened .txt transcript heuristic: requires repeated speaker + 2 distinct names
  *   - PDF title resolution (preserves Info.Title, falls back to filename)
  *   - requireNode20ForPdf throws a clear error when Node version is below 20
  *   - image ingest surfaces a clear error when the active provider is non-vision
@@ -61,8 +62,27 @@ describe("detectSourceType", () => {
   });
 
   it("routes .txt with speaker tags to transcript via content sniff", async () => {
-    const filePath = await makeTempFile("chat.txt", "Alice: Hi.\nBob: Hello.");
+    // Alice appears twice (back-and-forth) and there are 2 distinct speakers.
+    const filePath = await makeTempFile("chat.txt", "Alice: Hi.\nBob: Hello.\nAlice: How are you?");
     expect(await detectSourceType(filePath)).toBe("transcript");
+  });
+
+  it("routes .txt with single summary line to file (not transcript)", async () => {
+    const filePath = await makeTempFile("note.txt", "Summary: this is an ordinary project note.");
+    expect(await detectSourceType(filePath)).toBe("file");
+  });
+
+  it("routes .txt with multiple distinct section headers (no repeats) to file", async () => {
+    const contents = "Summary: foo\nDetails: bar\nNotes: baz";
+    const filePath = await makeTempFile("sections.txt", contents);
+    expect(await detectSourceType(filePath)).toBe("file");
+  });
+
+  it("routes .txt where only one name repeats but there is only 1 distinct speaker to file", async () => {
+    // Fails the distinct-speakers check (only "Summary" ever appears).
+    const contents = "Summary: foo\nSummary: bar";
+    const filePath = await makeTempFile("repeat-header.txt", contents);
+    expect(await detectSourceType(filePath)).toBe("file");
   });
 
   it("routes .txt with repeated timestamps to transcript via content sniff", async () => {

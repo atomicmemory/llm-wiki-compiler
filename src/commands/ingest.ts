@@ -30,10 +30,11 @@ function isUrl(source: string): boolean {
 const TXT_SNIFF_BYTES = 2048;
 
 /**
- * Regex for a speaker-tag line: "Name: " or "Name (timestamp): ".
+ * Regex for a speaker-tag line: captures the speaker name before the colon.
  * Allows names up to ~40 chars with letters, spaces, dots, apostrophes, hyphens.
+ * The `gm` flags let us find ALL occurrences in the sample.
  */
-const SPEAKER_TAG_PATTERN = /^[A-Z][a-zA-Z .'-]{0,40}:\s/m;
+const SPEAKER_TAG_PATTERN = /^([A-Z][a-zA-Z .'-]{0,40}):\s/gm;
 
 /**
  * Regex for a bare timestamp: "H:MM" or "HH:MM" or "HH:MM:SS" occurring at the
@@ -45,16 +46,72 @@ const TIMESTAMP_PATTERN = /\d{1,2}:\d{2}(:\d{2})?/;
 const MIN_TIMESTAMP_MATCHES = 3;
 
 /**
+ * Minimum number of times a single speaker name must appear to signal dialogue
+ * (rules out one-off section headers like "Summary:" that appear only once).
+ */
+const MIN_SPEAKER_REPEAT_COUNT = 2;
+
+/**
+ * Minimum number of distinct speaker names required alongside the repeat
+ * condition (rules out single-speaker monologues).
+ */
+const MIN_DISTINCT_SPEAKERS = 2;
+
+/**
+ * Count how many times each speaker name appears in the collected tag matches.
+ * Returns a Map from name → occurrence count.
+ */
+function countSpeakerOccurrences(sample: string): Map<string, number> {
+  const counts = new Map<string, number>();
+  // Reset lastIndex since SPEAKER_TAG_PATTERN has the `g` flag.
+  SPEAKER_TAG_PATTERN.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = SPEAKER_TAG_PATTERN.exec(sample)) !== null) {
+    const name = match[1].trim();
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/**
+ * Decide whether speaker-tag occurrences in a sample look like dialogue.
+ *
+ * A file passes when both of the following are true:
+ *  - At least {@link MIN_DISTINCT_SPEAKERS} distinct speaker names appear.
+ *  - At least one name appears {@link MIN_SPEAKER_REPEAT_COUNT}+ times,
+ *    indicating back-and-forth turns rather than a list of section headers
+ *    (e.g. "Summary: …", "Details: …") where every label is unique.
+ */
+function hasSpeakerDialoguePattern(sample: string): boolean {
+  const counts = countSpeakerOccurrences(sample);
+
+  const distinctSpeakers = counts.size;
+  const hasEnoughSpeakers = distinctSpeakers >= MIN_DISTINCT_SPEAKERS;
+
+  const hasRepeatedSpeaker = [...counts.values()].some(
+    (n) => n >= MIN_SPEAKER_REPEAT_COUNT,
+  );
+
+  return hasEnoughSpeakers && hasRepeatedSpeaker;
+}
+
+/**
  * Peek at the first {@link TXT_SNIFF_BYTES} of a plain-text file and decide
  * whether it looks like a conversation transcript.
  *
  * Heuristic: at least one of the following must be true in the sampled content:
- *  1. A speaker-tag line starting with "Name: " (e.g. "Alice: Hi.").
- *  2. Three or more bare timestamp patterns (e.g. "01:23" / "1:23:45"), which
- *     is the signature of a time-coded script or subtitle-like plain file.
  *
- * When neither signal fires the caller should route the file as a generic text
- * file, not a transcript.
+ *  1. **Speaker-tag dialogue pattern** — lines of the form "Name: …" where:
+ *     - At least {@link MIN_DISTINCT_SPEAKERS} distinct names appear, AND
+ *     - At least one name appears {@link MIN_SPEAKER_REPEAT_COUNT}+ times.
+ *     This rejects lone section headers ("Summary: …") and lists of unique
+ *     labels ("Summary:", "Details:", "Notes:") that have no repetition, while
+ *     accepting real back-and-forth dialogue ("Alice: …\nBob: …\nAlice: …").
+ *
+ *  2. **Timestamp density** — three or more bare timestamp patterns (e.g.
+ *     "01:23" / "1:23:45"), the signature of time-coded scripts or subtitles.
+ *
+ * When neither signal fires the caller routes the file as a generic text file.
  *
  * @param filePath - Absolute or relative path to the .txt file.
  * @returns `true` when transcript signals are detected, `false` otherwise.
@@ -63,7 +120,7 @@ async function looksLikeTxtTranscript(filePath: string): Promise<boolean> {
   const raw = await readFile(filePath, "utf-8");
   const sample = raw.slice(0, TXT_SNIFF_BYTES);
 
-  if (SPEAKER_TAG_PATTERN.test(sample)) return true;
+  if (hasSpeakerDialoguePattern(sample)) return true;
 
   const timestampMatches = sample.match(new RegExp(TIMESTAMP_PATTERN.source, "g"));
   return (timestampMatches?.length ?? 0) >= MIN_TIMESTAMP_MATCHES;

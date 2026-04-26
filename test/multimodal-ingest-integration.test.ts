@@ -88,7 +88,9 @@ const SRT_CONTENT = [
   "Bob: Hello there.",
 ].join("\n");
 
-const PLAIN_TRANSCRIPT_CONTENT = "Alice: Hi there.\nBob: Hello back.\n";
+// Needs 2 distinct speakers with at least one appearing 2+ times to pass the
+// tightened dialogue heuristic (Alice appears twice; Bob appears once).
+const PLAIN_TRANSCRIPT_CONTENT = "Alice: Hi there.\nBob: Hello back.\nAlice: How are you?\n";
 const PLAIN_PROSE_CONTENT = "This is a plain prose note with no speaker tags or timestamps.\n";
 
 /** Isolated workspace with its own sources/ directory. */
