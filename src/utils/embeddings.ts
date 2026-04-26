@@ -393,7 +393,11 @@ export async function updateEmbeddings(root: string, changedSlugs: string[]): Pr
   const previousChunks = modelChanged ? [] : existingStore?.chunks ?? [];
 
   // Cold start: embed every page so the store is immediately useful.
-  if (!existingStore || modelChanged) {
+  // Also treat an empty on-disk store as a cold start so that a project
+  // with no ingested pages yet (or a wiped store) gets populated the next
+  // time `compile` runs without needing an explicit slug change.
+  const isEmptyStore = isStoreEmpty(existingStore);
+  if (!existingStore || modelChanged || (isEmptyStore && liveSlugs.size > 0)) {
     for (const record of records) toEmbed.add(record.slug);
   }
 
@@ -428,6 +432,12 @@ async function persistRefreshedStore(
     "*",
     output.dim(`Embeddings updated (${entries.length} pages, ${chunks.length} chunks).`),
   );
+}
+
+/** Return true when a store exists on disk but has neither page nor chunk entries. */
+function isStoreEmpty(store: EmbeddingStore | null): boolean {
+  if (!store) return false;
+  return store.entries.length === 0 && (!store.chunks || store.chunks.length === 0);
 }
 
 /** Decide whether updateEmbeddings has work to do beyond a no-op. */

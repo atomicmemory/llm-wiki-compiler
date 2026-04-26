@@ -24,8 +24,6 @@
  */
 
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { execFile } from "child_process";
-import { promisify } from "util";
 import { mkdir, rm, writeFile } from "fs/promises";
 import path from "path";
 import os from "os";
@@ -41,9 +39,7 @@ import {
 } from "../src/utils/embeddings.js";
 import { rerankWithBm25 } from "../src/utils/retrieval.js";
 import { OpenAIProvider } from "../src/providers/openai.js";
-
-const exec = promisify(execFile);
-const CLI = path.resolve("dist/cli.js");
+import { runCLI, expectCLIExit, expectCLIFailure } from "./fixtures/run-cli.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -137,31 +133,27 @@ afterEach(() => {
 
 describe("query --help (CLI level)", () => {
   it("shows --debug flag in query help output", async () => {
-    const { stdout } = await exec("node", [CLI, "query", "--help"]);
-    expect(stdout).toContain("--debug");
+    const result = await runCLI(["query", "--help"], process.cwd());
+    expectCLIExit(result, 0);
+    expect(result.stdout).toContain("--debug");
   }, 30_000);
 
   it("shows --save flag alongside --debug in query help output", async () => {
-    const { stdout } = await exec("node", [CLI, "query", "--help"]);
-    expect(stdout).toContain("--save");
+    const result = await runCLI(["query", "--help"], process.cwd());
+    expectCLIExit(result, 0);
+    expect(result.stdout).toContain("--save");
   }, 30_000);
 });
 
 describe("query --debug credential guard (CLI level)", () => {
   it("exits non-zero without an API key", async () => {
-    let thrownCode: number | undefined;
-    let thrownStderr = "";
-    try {
-      await exec("node", [CLI, "query", "--debug", "what is chunked retrieval?"], {
-        env: { ...process.env, ANTHROPIC_API_KEY: "", ANTHROPIC_AUTH_TOKEN: "" },
-      });
-    } catch (err: unknown) {
-      const error = err as { stderr?: string; code?: number };
-      thrownCode = error.code;
-      thrownStderr = error.stderr ?? "";
-    }
-    expect(thrownCode).not.toBe(0);
-    expect(thrownStderr).toContain("Error:");
+    const result = await runCLI(
+      ["query", "--debug", "what is chunked retrieval?"],
+      process.cwd(),
+      { ANTHROPIC_API_KEY: "", ANTHROPIC_AUTH_TOKEN: "" },
+    );
+    expectCLIFailure(result);
+    expect(result.stderr).toContain("Error:");
   }, 30_000);
 });
 
@@ -275,6 +267,75 @@ describe("v1 → v2 store upgrade (programmatic)", () => {
     expect(loaded?.version).toBe(2);
     expect(loaded?.chunks).toHaveLength(2);
     expect(loaded?.chunks?.[0].contentHash).toMatch(/^hash-/);
+
+    await cleanupRoot(root);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Programmatic: empty-store cold-start (no LLM — OpenAI provider stubbed)
+// ---------------------------------------------------------------------------
+
+/** Shared setup: stub OpenAI and write an empty store of the given version. */
+async function setupEmptyStore(label: string, version: 1 | 2): Promise<string> {
+  const root = await makeTempRoot(label);
+  process.env.LLMWIKI_PROVIDER = "openai";
+  process.env.LLMWIKI_EMBEDDING_MODEL = "test-embed";
+  process.env.OPENAI_API_KEY = "test-key";
+  vi.spyOn(OpenAIProvider.prototype, "embed").mockResolvedValue([0.5, 0.5]);
+  const emptyStore: EmbeddingStore = {
+    version,
+    model: "test-embed",
+    dimensions: 0,
+    entries: [],
+    chunks: version === 2 ? [] : undefined,
+  };
+  await writeEmbeddingStore(root, emptyStore);
+  return root;
+}
+
+/**
+ * Assert that updateEmbeddings populated a v2 store with at least one chunk
+ * for the expected slug, then clean up the temp root.
+ */
+async function assertPopulatedAndCleanup(root: string, expectedSlug: string): Promise<void> {
+  await updateEmbeddings(root, []);
+  const store = await readEmbeddingStore(root);
+  expect(store?.version).toBe(2);
+  expect((store?.chunks ?? []).length).toBeGreaterThan(0);
+  expect(store?.chunks?.[0].slug).toBe(expectedSlug);
+  await cleanupRoot(root);
+}
+
+describe("empty-store cold-start (programmatic)", () => {
+  it("empty v1 store + live pages → populates chunks and upgrades to version 2", async () => {
+    const root = await setupEmptyStore("empty-v1-live", 1);
+    await writeFile(
+      path.join(root, "wiki/concepts/beta.md"),
+      "---\ntitle: Beta\nsummary: Beta page summary\n---\n\nContent for beta.",
+    );
+    await assertPopulatedAndCleanup(root, "beta");
+  });
+
+  it("empty v2 store + live pages → populates chunks", async () => {
+    const root = await setupEmptyStore("empty-v2-live", 2);
+    await writeFile(
+      path.join(root, "wiki/concepts/gamma.md"),
+      "---\ntitle: Gamma\nsummary: Gamma page summary\n---\n\nContent for gamma.",
+    );
+    await assertPopulatedAndCleanup(root, "gamma");
+  });
+
+  it("empty store + no live pages → no-op, store remains empty", async () => {
+    const root = await setupEmptyStore("empty-no-pages", 2);
+    // No wiki pages written — wiki/concepts/ directory exists but is empty.
+
+    await updateEmbeddings(root, []);
+    const store = await readEmbeddingStore(root);
+
+    // Store was not re-written; the on-disk empty store is unchanged.
+    expect(store?.entries).toHaveLength(0);
+    expect(store?.chunks ?? []).toHaveLength(0);
 
     await cleanupRoot(root);
   });
