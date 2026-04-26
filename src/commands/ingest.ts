@@ -37,10 +37,12 @@ const TXT_SNIFF_BYTES = 2048;
 const SPEAKER_TAG_PATTERN = /^([A-Z][a-zA-Z .'-]{0,40}):\s/gm;
 
 /**
- * Regex for a bare timestamp: "H:MM" or "HH:MM" or "HH:MM:SS" occurring at the
- * start of several lines (transcripts often have many such markers).
+ * Regex for a bare timestamp at the start of a line (allowing leading
+ * whitespace): "H:MM", "HH:MM", or "HH:MM:SS". Anchored to line starts so
+ * incidental times in prose (e.g. "the meeting at 3:00 was productive")
+ * don't trip the transcript heuristic.
  */
-const TIMESTAMP_PATTERN = /\d{1,2}:\d{2}(:\d{2})?/;
+const TIMESTAMP_PATTERN = /^\s*\d{1,2}:\d{2}(:\d{2})?/;
 
 /** Minimum number of timestamp-like matches to treat a file as a transcript. */
 const MIN_TIMESTAMP_MATCHES = 3;
@@ -122,7 +124,7 @@ async function looksLikeTxtTranscript(filePath: string): Promise<boolean> {
 
   if (hasSpeakerDialoguePattern(sample)) return true;
 
-  const timestampMatches = sample.match(new RegExp(TIMESTAMP_PATTERN.source, "g"));
+  const timestampMatches = sample.match(new RegExp(TIMESTAMP_PATTERN.source, "gm"));
   return (timestampMatches?.length ?? 0) >= MIN_TIMESTAMP_MATCHES;
 }
 
