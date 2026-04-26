@@ -147,10 +147,19 @@ describe("query --help (CLI level)", () => {
 
 describe("query --debug credential guard (CLI level)", () => {
   it("exits non-zero without an API key", async () => {
+    // Pin the provider and settings path so this test passes in any dev
+    // environment (e.g. one with LLMWIKI_PROVIDER=ollama set globally would
+    // otherwise route through ollama and not hit the Anthropic credential
+    // guard we're trying to test).
     const result = await runCLI(
       ["query", "--debug", "what is chunked retrieval?"],
       process.cwd(),
-      { ANTHROPIC_API_KEY: "", ANTHROPIC_AUTH_TOKEN: "" },
+      {
+        ANTHROPIC_API_KEY: "",
+        ANTHROPIC_AUTH_TOKEN: "",
+        LLMWIKI_PROVIDER: "anthropic",
+        LLMWIKI_CLAUDE_SETTINGS_PATH: "/tmp/llmwiki-nonexistent-claude-settings",
+      },
     );
     expectCLIFailure(result);
     expect(result.stderr).toContain("Error:");
