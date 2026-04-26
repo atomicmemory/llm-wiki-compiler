@@ -22,4 +22,12 @@ export default async function reviewShowCommand(id: string): Promise<void> {
 
   console.log();
   console.log(candidate.body);
+
+  if (candidate.schemaViolations && candidate.schemaViolations.length > 0) {
+    console.log();
+    output.header("Schema violations");
+    for (const v of candidate.schemaViolations) {
+      output.status("!", output.warn(`[${v.severity}] ${v.message}`));
+    }
+  }
 }

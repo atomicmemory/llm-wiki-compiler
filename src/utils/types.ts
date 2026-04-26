@@ -3,6 +3,8 @@
  * All shared interfaces live here to keep the module boundary clean.
  */
 
+import type { PageKind } from "../schema/types.js";
+
 /**
  * Lifecycle state of a concept or page's provenance.
  * - `extracted`: drawn directly from a source document.
@@ -63,7 +65,7 @@ export interface SourceChange {
 }
 
 /** Wiki page frontmatter parsed from YAML. */
-interface WikiFrontmatter {
+export interface WikiFrontmatter {
   title: string;
   sources: string[];
   summary: string;
@@ -72,6 +74,13 @@ interface WikiFrontmatter {
   aliases?: string[];
   createdAt: string;
   updatedAt: string;
+  /**
+   * Optional typed page kind. Defaults to "concept" when absent so existing
+   * pages compiled before the schema layer existed continue to work.
+   * Uses the canonical PageKind union from the schema layer — import is
+   * type-only so it is erased at compile time and creates no runtime cycle.
+   */
+  kind?: PageKind;
   /** Numeric confidence in 0..1 — overall confidence in the page's claims. */
   confidence?: number;
   /** Lifecycle state describing how the page's content was produced. */
@@ -138,6 +147,15 @@ export interface ReviewCandidate {
    * regenerate on every subsequent compile.
    */
   sourceStates?: Record<string, SourceState>;
+  /**
+   * Schema lint violations detected at candidate-generation time.
+   *
+   * Populated when the candidate body violates a schema rule (e.g. fewer
+   * wikilinks than the kind's `minWikilinks` requires). Only set when at
+   * least one violation exists — absent when the candidate is clean.
+   * `review show` surfaces these so reviewers see failures before approving.
+   */
+  schemaViolations?: import("../linter/types.js").LintResult[];
 }
 
 /** A single chunk citation surfaced as part of a query result. */
@@ -171,12 +189,17 @@ export interface QueryResult {
   debug?: RetrievalDebug;
 }
 
+/** Source type tag persisted in frontmatter to describe the ingest origin. */
+export type SourceType = "web" | "file" | "image" | "pdf" | "transcript";
+
 /** Structured result returned by the ingest pipeline. */
 export interface IngestResult {
   filename: string;
   charCount: number;
   truncated: boolean;
   source: string;
+  /** Detected source type; undefined for legacy results produced before this field was added. */
+  sourceType?: SourceType;
 }
 
 /**
