@@ -118,7 +118,8 @@ program
   .command("query <question>")
   .description("Ask a question against the wiki")
   .option("--save", "Save the answer as a wiki page")
-  .action(async (question: string, options: { save?: boolean }) => {
+  .option("--debug", "Print which pages and chunks were selected and their scores")
+  .action(async (question: string, options: { save?: boolean; debug?: boolean }) => {
     try {
       requireProvider();
       await queryCommand(process.cwd(), question, options);

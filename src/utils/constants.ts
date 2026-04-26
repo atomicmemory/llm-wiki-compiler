@@ -77,6 +77,21 @@ export const CANDIDATES_ARCHIVE_DIR = ".llmwiki/candidates/archive";
 /** Number of most similar pages to return from embedding-based pre-filter. */
 export const EMBEDDING_TOP_K = 15;
 
+/** Number of chunk candidates to retain after the semantic-similarity step. */
+export const CHUNK_TOP_K = 30;
+
+/** Number of chunk candidates to keep after reranking. */
+export const CHUNK_RERANK_KEEP = 12;
+
+/** Target chunk size in characters; chunks try to land near this length. */
+export const CHUNK_TARGET_CHARS = 800;
+
+/** Hard upper bound on a single chunk's character length. */
+export const CHUNK_MAX_CHARS = 1_400;
+
+/** Minimum standalone chunk size; smaller trailing fragments are merged back. */
+export const CHUNK_MIN_CHARS = 200;
+
 /** Provenance metadata thresholds used by lint rules. */
 export const LOW_CONFIDENCE_THRESHOLD = 0.5;
 export const MAX_INFERRED_PARAGRAPHS_WITHOUT_CITATIONS = 2;
