@@ -38,7 +38,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=24"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
