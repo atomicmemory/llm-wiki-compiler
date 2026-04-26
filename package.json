@@ -57,6 +57,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@copilotkit/aimock": "^1.15.1",
     "@types/js-yaml": "^4.0.9",
     "@types/jsdom": "^21.1.0",
     "@types/turndown": "^5.0.0",
