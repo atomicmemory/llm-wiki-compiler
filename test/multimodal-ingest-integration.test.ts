@@ -16,7 +16,7 @@
  *  - Plain-text transcript with speaker tags: routes to transcript adapter
  *  - Plain-text prose without transcript signals: routes to file adapter
  *  - Plain-text with section headers but no repeats: routes to file adapter
- *  - PDF: written with sourceType pdf, text extracted (Node 20+ only)
+ *  - PDF: written with sourceType pdf, text extracted
  *  - Image without credentials: exits non-zero with actionable error message
  *  - Extension routing verified end-to-end for .vtt, .srt, and .pdf
  *  - Empty file: fails or produces skeleton, does not crash
@@ -38,10 +38,6 @@ import path from "path";
 import { mkdtemp, rm, readdir, readFile, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { runCLI, expectCLIExit, expectCLIFailure, formatCLIFailure } from "./fixtures/run-cli.js";
-
-/** PDF ingest requires Node 20+ (pdfjs-dist uses DOMMatrix, unavailable in Node 18). */
-const nodeMajor = parseInt(process.version.slice(1).split(".")[0], 10);
-const isPdfCapable = nodeMajor >= 20;
 
 /** Number of distinct fixture files ingested in the bulk-ingest test. */
 const BULK_INGEST_COUNT = 3;
@@ -201,7 +197,7 @@ describe("multimodal ingest CLI integration", () => {
     expect(markdown).toContain("sourceType: file");
   }, 15_000);
 
-  it.skipIf(!isPdfCapable)("ingest a .pdf writes markdown with sourceType pdf and extracted text", async () => {
+  it("ingest a .pdf writes markdown with sourceType pdf and extracted text", async () => {
     const workspace = await makeWorkspaceFromFixture("sample.pdf");
     const { result, markdown } = await runIngest(workspace);
     expect(result.stdout, formatCLIFailure(result)).toContain("Next: llmwiki compile");
@@ -231,7 +227,7 @@ describe("multimodal ingest CLI integration", () => {
     await assertExtensionRoutesTo("sample-subtitles.srt", "transcript");
   }, 15_000);
 
-  it.skipIf(!isPdfCapable)("source-type detection routes .pdf by extension through the full CLI", async () => {
+  it("source-type detection routes .pdf by extension through the full CLI", async () => {
     await assertExtensionRoutesTo("sample.pdf", "pdf");
   }, 15_000);
 });
@@ -257,7 +253,7 @@ describe("multimodal ingest — sourceType frontmatter per fixture", () => {
     expect(markdown).toContain("sourceType: transcript");
   }, 15_000);
 
-  it.skipIf(!isPdfCapable)("sample.pdf has sourceType pdf in frontmatter", async () => {
+  it("sample.pdf has sourceType pdf in frontmatter", async () => {
     const workspace = await makeWorkspaceFromFixture("sample.pdf");
     const { markdown } = await runIngest(workspace);
     expect(markdown).toContain("sourceType: pdf");
