@@ -54,6 +54,10 @@ export async function stopMockClaude(handle: MockClaudeHandle): Promise<void> {
  * Env overrides to inject into `runCLI` so the CLI subprocess routes
  * Anthropic API calls to the mock. The mock-key value is arbitrary —
  * the CLI's credential check only verifies the env var is non-empty.
+ *
+ * Note: Anthropic embeddings go to Voyage (a different host) which is
+ * NOT intercepted by this helper. Use {@link mockOpenAIEnv} for tests
+ * that need both completions and embeddings stubbed under one base URL.
  */
 export function mockClaudeEnv(handle: MockClaudeHandle): NodeJS.ProcessEnv {
   return {
@@ -62,5 +66,27 @@ export function mockClaudeEnv(handle: MockClaudeHandle): NodeJS.ProcessEnv {
     // Pin provider explicitly so a dev environment with LLMWIKI_PROVIDER=ollama
     // doesn't bypass the Anthropic mock.
     LLMWIKI_PROVIDER: "anthropic",
+  };
+}
+
+/**
+ * Env overrides for OpenAI-mode subprocess tests. Use this when the test
+ * needs both chat and embedding calls intercepted (the OpenAI provider
+ * routes both through OPENAI_BASE_URL, unlike the Anthropic provider
+ * which uses Voyage for embeddings).
+ *
+ * @param handle - aimock handle from {@link startMockClaude}.
+ * @param model - Optional model name override (defaults to "gpt-4o").
+ */
+export function mockOpenAIEnv(
+  handle: MockClaudeHandle,
+  model = "gpt-4o",
+): NodeJS.ProcessEnv {
+  return {
+    OPENAI_BASE_URL: `${handle.url}/v1`,
+    OPENAI_API_KEY: "mock-key-for-aimock",
+    LLMWIKI_PROVIDER: "openai",
+    LLMWIKI_MODEL: model,
+    LLMWIKI_EMBEDDING_MODEL: "text-embedding-3-small",
   };
 }
