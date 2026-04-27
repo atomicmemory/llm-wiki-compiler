@@ -11,5 +11,5 @@ Each file is intentionally minimal (KB scale) so it can be committed and inspect
 | `sample-dialogue.txt` | Multi-turn `Alice`/`Bob` dialogue. Two distinct speakers, `Alice` appears 3 times — satisfies the repeat heuristic. Routes to `transcript`. |
 | `sample-notes.txt` | Plain prose paragraph, no speaker tags or timestamps. Routes to `file`. |
 | `sample-headers.txt` | Three distinct section labels (`Summary`, `Details`, `Notes`) each appearing exactly once. Fails the repeat heuristic — routes to `file`. |
-| `sample.pdf` | Minimal valid PDF with extractable text "Hello PDF World". Routes to `pdf` (Node 20+ only). |
+| `sample.pdf` | Minimal valid PDF with extractable text "Hello PDF World". Routes to `pdf`. |
 | `sample-1x1.png` | Minimal valid 1×1 red PNG (69 bytes). Used to exercise the image credential-check path without making real vision API calls. Routes to `image`. |

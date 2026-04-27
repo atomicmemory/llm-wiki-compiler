@@ -400,7 +400,7 @@ If you like ambitious problems: **multimodal ingest**, **chunked retrieval with 
 
 ## Requirements
 
-Node.js >= 18, plus provider credentials (for Anthropic: `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`).
+Node.js >= 24, plus provider credentials (for Anthropic: `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`).
 
 ## License
 
