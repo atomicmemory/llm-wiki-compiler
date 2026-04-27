@@ -370,6 +370,12 @@ Karpathy describes an abstract pattern for turning raw data into compiled knowle
 
 ## Roadmap
 
+Shipped in 0.5.0:
+
+- ✅ Multimodal ingest (images, PDFs, transcripts)
+- ✅ Chunked retrieval with reranking and `--debug` output
+- ⚠️ Minimum Node version raised to 24 (was 18)
+
 Shipped in 0.4.0:
 
 - ✅ Claim-level provenance with source ranges
@@ -391,12 +397,20 @@ Shipped in 0.2.0:
 
 Next up:
 
-- Multimodal ingest (images, PDFs, transcripts)
-- Chunked retrieval with reranking
 - Export bundle (`llms.txt`, JSON, JSON-LD, GraphML, Marp)
 - Session-history adapters (Claude, Codex, Cursor exports)
 
-If you like ambitious problems: **multimodal ingest**, **chunked retrieval with reranking**, and **export bundles** are the meatiest. Open an issue to claim one or kick off a design discussion.
+Future ideas (open to discussion):
+
+- Recurring source refresh jobs — re-ingest URLs on a schedule, diff against the prior snapshot, re-compile only what changed
+- Graph export and a lightweight read-only graph browser for the concept network
+- A local read-only web UI for browsing the compiled wiki without Obsidian
+- MCP prompt resources — curated agent prompts (review the wiki, propose new sources, draft a comparison page) shipped as MCP resources
+- Maintenance log + log rotation so long-running watch sessions don't grow unbounded
+
+If you like ambitious problems: **graph export with a browser**, **recurring source refresh**, and **MCP prompt resources** are the meatiest of the futures. Open an issue to claim one or kick off a design discussion.
+
+Explicitly not planned (good ideas, just not for this repo): full static-site generator, desktop or mobile apps, fine-tuning, a formal ontology engine, heavy graph reasoning.
 
 ## Requirements
 
