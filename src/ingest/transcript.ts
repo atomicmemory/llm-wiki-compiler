@@ -14,25 +14,10 @@
 import { readFile } from "fs/promises";
 import path from "path";
 import { titleFromFilename, type IngestedSource } from "./shared.js";
-// The youtube-transcript@1.3.0 package ships a CJS file as its `main` entry
-// while declaring `"type": "module"` in its package.json — the main entry is
-// unloadable from native ESM at runtime. Bypass the broken main by importing
-// the bundled ESM dist file directly. We attach a local type for the only
-// method we use because the deep import path lacks bundled .d.ts.
-// @ts-expect-error -- deep import: see comment above.
-import { YoutubeTranscript as YoutubeTranscriptUntyped } from "youtube-transcript/dist/youtube-transcript.esm.js";
-
-interface YoutubeTranscriptSegment {
-  text: string;
-  offset: number;
-  duration: number;
-}
-
-interface YoutubeTranscriptApi {
-  fetchTranscript(videoId: string): Promise<YoutubeTranscriptSegment[]>;
-}
-
-const YoutubeTranscript = YoutubeTranscriptUntyped as YoutubeTranscriptApi;
+// youtube-transcript exports proper ESM via its package.json `exports` map.
+// Import from the package root; the "import" condition resolves to
+// ./dist/esm/index.js and includes bundled .d.ts types.
+import { YoutubeTranscript } from "youtube-transcript";
 
 /** Pattern that identifies a YouTube URL. */
 const YOUTUBE_URL_PATTERN = /^https?:\/\/(www\.)?(youtube\.com\/watch|youtu\.be\/)/;
