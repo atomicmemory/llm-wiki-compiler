@@ -26,6 +26,10 @@
  */
 
 import { LLMock } from "@copilotkit/aimock";
+import { mkdtemp, mkdir, rm, writeFile } from "fs/promises";
+import path from "path";
+import { tmpdir } from "os";
+import { afterEach } from "vitest";
 
 /** Handle returned from {@link startMockClaude}. */
 export interface MockClaudeHandle {
@@ -89,4 +93,63 @@ export function mockOpenAIEnv(
     LLMWIKI_MODEL: model,
     LLMWIKI_EMBEDDING_MODEL: "text-embedding-3-small",
   };
+}
+
+/** Live state managed by {@link useAimockLifecycle}. */
+export interface AimockLifecycle {
+  /** Currently-running mock, or null between tests. Set by `start()`. */
+  handle: MockClaudeHandle | null;
+  /** Start a fresh mock and store the handle in `lifecycle.handle`. */
+  start: () => Promise<MockClaudeHandle>;
+  /** Create a temp project workspace with sources/ + one source file. */
+  makeWorkspace: (sourceContent: string, sourceName?: string) => Promise<string>;
+}
+
+/**
+ * Vitest composable that wires up afterEach cleanup for an aimock-backed
+ * subprocess test: stops the mock if one was started, then removes any
+ * temp workspaces created by `makeWorkspace`. Avoids per-file boilerplate
+ * for the common pattern.
+ *
+ * @example
+ * ```
+ * const aimock = useAimockLifecycle("my-test");
+ * it("...", async () => {
+ *   const handle = await aimock.start();
+ *   handle.mock.onMessage(/.* /, { content: "..." });
+ *   const cwd = await aimock.makeWorkspace("# source\n");
+ *   const result = await runCLI(["compile"], cwd, mockOpenAIEnv(handle));
+ *   ...
+ * });
+ * ```
+ */
+export function useAimockLifecycle(workspacePrefix: string): AimockLifecycle {
+  const tempDirs: string[] = [];
+  const lifecycle: AimockLifecycle = {
+    handle: null,
+    async start(): Promise<MockClaudeHandle> {
+      lifecycle.handle = await startMockClaude();
+      return lifecycle.handle;
+    },
+    async makeWorkspace(sourceContent: string, sourceName = "intro.md"): Promise<string> {
+      const cwd = await mkdtemp(path.join(tmpdir(), `llmwiki-${workspacePrefix}-`));
+      tempDirs.push(cwd);
+      await mkdir(path.join(cwd, "sources"), { recursive: true });
+      await writeFile(path.join(cwd, "sources", sourceName), sourceContent, "utf-8");
+      return cwd;
+    },
+  };
+
+  afterEach(async () => {
+    if (lifecycle.handle) {
+      await stopMockClaude(lifecycle.handle);
+      lifecycle.handle = null;
+    }
+    while (tempDirs.length > 0) {
+      const dir = tempDirs.pop();
+      if (dir) await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  return lifecycle;
 }

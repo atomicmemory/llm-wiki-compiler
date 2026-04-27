@@ -11,47 +11,23 @@
  * compile --review, image vision, etc).
  */
 
-import { describe, it, expect, afterEach } from "vitest";
-import { mkdtemp, mkdir, rm, writeFile, readdir, readFile } from "fs/promises";
+import { describe, it, expect } from "vitest";
+import { readdir, readFile } from "fs/promises";
 import path from "path";
-import { tmpdir } from "os";
 import {
-  startMockClaude,
-  stopMockClaude,
   mockClaudeEnv,
-  type MockClaudeHandle,
+  useAimockLifecycle,
 } from "./fixtures/aimock-helper.js";
 import { runCLI, expectCLIExit } from "./fixtures/run-cli.js";
 
-const tempDirs: string[] = [];
-let mockHandle: MockClaudeHandle | null = null;
-
-afterEach(async () => {
-  if (mockHandle) {
-    await stopMockClaude(mockHandle);
-    mockHandle = null;
-  }
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop();
-    if (dir) await rm(dir, { recursive: true, force: true });
-  }
-});
-
-/** Make a temp project workspace with one source file ready for compile. */
-async function makeWorkspace(sourceContent: string): Promise<string> {
-  const cwd = await mkdtemp(path.join(tmpdir(), "llmwiki-aimock-smoke-"));
-  tempDirs.push(cwd);
-  await mkdir(path.join(cwd, "sources"), { recursive: true });
-  await writeFile(path.join(cwd, "sources", "intro.md"), sourceContent, "utf-8");
-  return cwd;
-}
+const aimock = useAimockLifecycle("aimock-smoke");
 
 describe("aimock subprocess smoke", () => {
   it("compile --review writes a candidate using the mocked Claude response", async () => {
-    mockHandle = await startMockClaude();
+    const handle = await aimock.start();
 
     // Stub the extraction tool call: one new concept named "Mock Concept".
-    mockHandle.mock.onToolCall("extract_concepts", {
+    handle.mock.onToolCall("extract_concepts", {
       toolCalls: [
         {
           name: "extract_concepts",
@@ -71,18 +47,18 @@ describe("aimock subprocess smoke", () => {
     });
 
     // Stub the page-body generation: any subsequent message → canned body.
-    mockHandle.mock.onMessage(/.*/, {
+    handle.mock.onMessage(/.*/, {
       content: "Mock concept body produced via aimock for the smoke test.",
     });
 
-    const cwd = await makeWorkspace(
+    const cwd = await aimock.makeWorkspace(
       "# Mock Source\n\nA short source document for the smoke test.\n",
     );
 
     const result = await runCLI(
       ["compile", "--review"],
       cwd,
-      mockClaudeEnv(mockHandle),
+      mockClaudeEnv(handle),
     );
 
     expectCLIExit(result, 0);
