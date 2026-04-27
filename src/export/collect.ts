@@ -11,7 +11,7 @@ import path from "path";
 import { parseFrontmatter } from "../utils/markdown.js";
 import { slugify } from "../utils/markdown.js";
 import { CONCEPTS_DIR, QUERIES_DIR } from "../utils/constants.js";
-import type { ExportPage } from "./types.js";
+import type { ExportPage, PageKind } from "./types.js";
 
 /** Regex that matches [[wikilink]] or [[wikilink|alias]] patterns. */
 const WIKILINK_RE = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
@@ -34,7 +34,11 @@ export function extractWikilinkSlugs(body: string): string[] {
  * Parse a single markdown file into an ExportPage.
  * Returns null when the page is orphaned or missing a title.
  */
-async function parsePageFile(filePath: string, slug: string): Promise<ExportPage | null> {
+async function parsePageFile(
+  filePath: string,
+  slug: string,
+  kind: PageKind,
+): Promise<ExportPage | null> {
   let raw: string;
   try {
     raw = await readFile(filePath, "utf-8");
@@ -50,6 +54,7 @@ async function parsePageFile(filePath: string, slug: string): Promise<ExportPage
   return {
     title: meta.title,
     slug,
+    kind,
     summary: typeof meta.summary === "string" ? meta.summary : "",
     sources: Array.isArray(meta.sources)
       ? (meta.sources as unknown[]).filter((s): s is string => typeof s === "string")
@@ -67,8 +72,9 @@ async function parsePageFile(filePath: string, slug: string): Promise<ExportPage
 /**
  * Collect all valid ExportPage entries from a single wiki directory.
  * @param dirPath - Absolute path to a wiki page directory.
+ * @param kind - The kind of pages in this directory.
  */
-async function collectFromDir(dirPath: string): Promise<ExportPage[]> {
+async function collectFromDir(dirPath: string, kind: PageKind): Promise<ExportPage[]> {
   let files: string[];
   try {
     files = await readdir(dirPath);
@@ -79,7 +85,7 @@ async function collectFromDir(dirPath: string): Promise<ExportPage[]> {
   const pages: ExportPage[] = [];
   for (const file of files.filter((f) => f.endsWith(".md"))) {
     const slug = file.replace(/\.md$/, "");
-    const page = await parsePageFile(path.join(dirPath, file), slug);
+    const page = await parsePageFile(path.join(dirPath, file), slug, kind);
     if (page) pages.push(page);
   }
   return pages;
@@ -95,8 +101,8 @@ export async function collectExportPages(root: string): Promise<ExportPage[]> {
   const queriesPath = path.join(root, QUERIES_DIR);
 
   const [concepts, queries] = await Promise.all([
-    collectFromDir(conceptsPath),
-    collectFromDir(queriesPath),
+    collectFromDir(conceptsPath, "concepts"),
+    collectFromDir(queriesPath, "queries"),
   ]);
 
   const all = [...concepts, ...queries];

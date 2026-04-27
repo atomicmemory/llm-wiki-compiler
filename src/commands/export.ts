@@ -24,8 +24,8 @@ import { buildJsonExport } from "../export/json-export.js";
 import { buildJsonLd } from "../export/json-ld.js";
 import { buildGraphml } from "../export/graphml.js";
 import { buildMarp } from "../export/marp.js";
-import { EXPORT_TARGETS } from "../export/types.js";
-import type { ExportTarget } from "../export/types.js";
+import { EXPORT_TARGETS, MARP_SOURCES } from "../export/types.js";
+import type { ExportTarget, MarpSource } from "../export/types.js";
 
 const require = createRequire(import.meta.url);
 
@@ -46,6 +46,11 @@ const TARGET_FILENAMES: Record<ExportTarget, string> = {
 export interface ExportOptions {
   /** Limit export to a single target. When absent all targets are produced. */
   target?: string;
+  /**
+   * For the marp target: which page kinds to include.
+   * Accepts "concepts", "queries", or "all" (default when absent).
+   */
+  source?: string;
 }
 
 /** Result returned by runExport for testing and MCP consumers. */
@@ -71,11 +76,28 @@ function isValidTarget(value: string): value is ExportTarget {
   return (EXPORT_TARGETS as readonly string[]).includes(value);
 }
 
+/** Return true when the given string is a valid MarpSource. */
+function isValidMarpSource(value: string): value is MarpSource {
+  return (MARP_SOURCES as readonly string[]).includes(value);
+}
+
+/** Resolve and validate the marp source filter. Throws for unknown values. */
+function resolveMarpSource(rawSource: string | undefined): MarpSource {
+  if (!rawSource) return "all";
+  if (!isValidMarpSource(rawSource)) {
+    throw new Error(
+      `Unknown --source value "${rawSource}". Valid values: ${MARP_SOURCES.join(", ")}`,
+    );
+  }
+  return rawSource;
+}
+
 /** Build the content string for a single target. */
 function buildContent(
   target: ExportTarget,
   pages: ReturnType<typeof collectExportPages> extends Promise<infer T> ? T : never,
   projectTitle: string,
+  marpSource: MarpSource,
 ): string {
   switch (target) {
     case "llms-txt":
@@ -89,7 +111,7 @@ function buildContent(
     case "graphml":
       return buildGraphml(pages);
     case "marp":
-      return buildMarp(pages, projectTitle);
+      return buildMarp(pages, projectTitle, marpSource);
   }
 }
 
@@ -104,10 +126,11 @@ export async function runExport(root: string, options: ExportOptions = {}): Prom
   const projectTitle = resolveProjectTitle(root);
 
   const targets = resolveTargets(options.target);
+  const marpSource = resolveMarpSource(options.source);
   const written: string[] = [];
 
   for (const target of targets) {
-    const content = buildContent(target, pages, projectTitle);
+    const content = buildContent(target, pages, projectTitle, marpSource);
     const outPath = path.join(root, EXPORT_DIR, TARGET_FILENAMES[target]);
     await atomicWrite(outPath, content);
     written.push(outPath);

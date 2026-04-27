@@ -27,6 +27,7 @@ import type { ExportPage } from "../src/export/types.js";
 const SAMPLE_PAGE: ExportPage = {
   title: "Quantum Entanglement",
   slug: "quantum-entanglement",
+  kind: "concepts",
   summary: "A spooky phenomenon.",
   sources: ["paper.md"],
   tags: ["physics"],
@@ -39,6 +40,7 @@ const SAMPLE_PAGE: ExportPage = {
 const SECOND_PAGE: ExportPage = {
   title: "Superposition",
   slug: "superposition",
+  kind: "concepts",
   summary: "States coexist.",
   sources: [],
   tags: ["physics", "quantum"],

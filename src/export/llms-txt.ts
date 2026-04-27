@@ -1,37 +1,74 @@
 /**
  * llms.txt export format writer.
  *
- * Produces a concise machine-readable index per the llmstxt.org spec:
- *   - H1 title
- *   - Optional block quote description
- *   - Bullet-list of page entries: title, summary, relative link
+ * Produces a machine-readable index per the llmstxt.org spec:
+ *   - H1 project title
+ *   - Optional blockquote description
+ *   - H2-delimited sections per page kind (## Concepts, ## Saved Queries)
+ *   - Bullet entries: [Title](path): summary | tags | sources | timestamps
  *
  * The companion llms-full.txt format appends the full body of every page
  * so a model can read the entire wiki in one file.
+ *
+ * Reference: https://llmstxt.org
  */
 
 import type { ExportPage } from "./types.js";
 
 /**
- * Build the concise llms.txt index content.
+ * Build the wiki-relative path for a page based on its kind.
+ * Concepts live in wiki/concepts/, queries in wiki/queries/.
+ */
+function pageRelativePath(page: ExportPage): string {
+  return `wiki/${page.kind}/${page.slug}.md`;
+}
+
+/**
+ * Build the inline note clause for a page entry.
+ * Follows the colon after the markdown link per spec.
+ */
+function buildEntryNote(page: ExportPage): string {
+  const parts: string[] = [];
+  if (page.summary) parts.push(page.summary);
+  if (page.tags.length > 0) parts.push(`tags: ${page.tags.join(", ")}`);
+  if (page.sources.length > 0) parts.push(`sources: ${page.sources.join(", ")}`);
+  parts.push(`created: ${page.createdAt}`);
+  parts.push(`updated: ${page.updatedAt}`);
+  return parts.join(" | ");
+}
+
+/** Format a single page as a spec-compliant bullet entry. */
+function formatPageEntry(page: ExportPage): string {
+  const note = buildEntryNote(page);
+  return `- [${page.title}](${pageRelativePath(page)}): ${note}`;
+}
+
+/** Build entries for a filtered subset of pages under an H2 section. */
+function buildSection(heading: string, pages: ExportPage[]): string[] {
+  if (pages.length === 0) return [];
+  return [`## ${heading}`, "", ...pages.map(formatPageEntry), ""];
+}
+
+/**
+ * Build the concise llms.txt index content per the llmstxt.org spec.
+ * Pages are split into Concepts and Saved Queries sections (H2 delimited).
  * @param pages - Sorted array of export pages.
  * @param projectTitle - Human-readable wiki title shown as the H1.
  * @returns Full llms.txt string.
  */
 export function buildLlmsTxt(pages: ExportPage[], projectTitle: string): string {
+  const concepts = pages.filter((p) => p.kind === "concepts");
+  const queries = pages.filter((p) => p.kind === "queries");
+
   const lines: string[] = [
     `# ${projectTitle}`,
     "",
     `> ${pages.length} pages — exported ${new Date().toISOString()}`,
     "",
+    ...buildSection("Concepts", concepts),
+    ...buildSection("Saved Queries", queries),
   ];
 
-  for (const page of pages) {
-    const summaryClause = page.summary ? ` — ${page.summary}` : "";
-    lines.push(`- [${page.title}](wiki/concepts/${page.slug}.md)${summaryClause}`);
-  }
-
-  lines.push("");
   return lines.join("\n");
 }
 
@@ -52,6 +89,7 @@ export function buildLlmsFullTxt(pages: ExportPage[], projectTitle: string): str
       "---",
       `## ${page.title}`,
       `> ${page.summary}${tags}${sources}`,
+      `Created: ${page.createdAt} | Updated: ${page.updatedAt}`,
       "",
     ].join("\n");
     sections.push(`${header}\n${page.body.trim()}\n`);

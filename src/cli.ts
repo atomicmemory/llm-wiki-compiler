@@ -187,7 +187,11 @@ program
   .command("export")
   .description("Export wiki content to portable formats (llms.txt, JSON, GraphML, Marp, …)")
   .option("--target <name>", "Limit export to a single target format")
-  .action(async (options: { target?: string }) => {
+  .option(
+    "--source <kind>",
+    "For marp target: which pages to include — concepts, queries, or all (default: all)",
+  )
+  .action(async (options: { target?: string; source?: string }) => {
     try {
       await exportCommand(process.cwd(), options);
     } catch (err) {

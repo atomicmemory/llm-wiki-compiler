@@ -27,19 +27,26 @@ function escapeXml(value: string): string {
 
 /** GraphML attribute key definitions. */
 const KEY_DEFS = [
-  '<key id="title"   for="node" attr.name="title"   attr.type="string"/>',
-  '<key id="summary" for="node" attr.name="summary"  attr.type="string"/>',
-  '<key id="tags"    for="node" attr.name="tags"     attr.type="string"/>',
+  '<key id="title"     for="node" attr.name="title"     attr.type="string"/>',
+  '<key id="summary"   for="node" attr.name="summary"   attr.type="string"/>',
+  '<key id="tags"      for="node" attr.name="tags"      attr.type="string"/>',
+  '<key id="sources"   for="node" attr.name="sources"   attr.type="string"/>',
+  '<key id="createdAt" for="node" attr.name="createdAt" attr.type="string"/>',
+  '<key id="updatedAt" for="node" attr.name="updatedAt" attr.type="string"/>',
 ].join("\n  ");
 
 /** Serialise one ExportPage as a GraphML <node> element. */
 function pageToNode(page: ExportPage): string {
   const tags = page.tags.join(", ");
+  const sources = page.sources.join(", ");
   return [
     `  <node id="${escapeXml(page.slug)}">`,
     `    <data key="title">${escapeXml(page.title)}</data>`,
     `    <data key="summary">${escapeXml(page.summary)}</data>`,
     `    <data key="tags">${escapeXml(tags)}</data>`,
+    `    <data key="sources">${escapeXml(sources)}</data>`,
+    `    <data key="createdAt">${escapeXml(page.createdAt)}</data>`,
+    `    <data key="updatedAt">${escapeXml(page.updatedAt)}</data>`,
     `  </node>`,
   ].join("\n");
 }

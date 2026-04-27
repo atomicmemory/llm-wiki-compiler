@@ -3,13 +3,16 @@
  *
  * Produces a single Markdown file with Marp frontmatter that can be rendered
  * as a slide deck by the Marp CLI or VS Code Marp extension. Each wiki page
- * becomes one slide showing the title, summary, tags, and an excerpt of the
- * body (first paragraph, up to a readable limit).
+ * becomes one slide showing the title, summary, tags, sources, timestamps,
+ * and an excerpt of the body (first paragraph, up to a readable limit).
+ *
+ * The caller may pre-filter pages by kind ("concepts" | "queries" | "all")
+ * using the --source option on the CLI.
  *
  * Reference: https://marp.app/
  */
 
-import type { ExportPage } from "./types.js";
+import type { ExportPage, MarpSource } from "./types.js";
 
 /** Maximum characters of body text to include per slide. */
 const SLIDE_BODY_MAX_CHARS = 300;
@@ -28,26 +31,52 @@ function extractFirstParagraph(body: string): string {
   return `${stripped.slice(0, SLIDE_BODY_MAX_CHARS)}…`;
 }
 
+/** Build the speaker-notes block for a slide containing metadata. */
+function buildSpeakerNotes(page: ExportPage): string {
+  const parts: string[] = [`created: ${page.createdAt}`, `updated: ${page.updatedAt}`];
+  if (page.sources.length > 0) parts.push(`sources: ${page.sources.join(", ")}`);
+  return `<!-- ${parts.join(" | ")} -->`;
+}
+
 /** Render one ExportPage as a Marp slide. */
 function pageToSlide(page: ExportPage): string {
   const tagLine = page.tags.length > 0 ? `\n_Tags: ${page.tags.join(", ")}_` : "";
   const excerpt = extractFirstParagraph(page.body);
+  const notes = buildSpeakerNotes(page);
   return [
     `## ${page.title}`,
     "",
     `> ${page.summary}${tagLine}`,
     "",
     excerpt,
+    "",
+    notes,
   ].join("\n");
 }
 
 /**
+ * Filter pages by the requested marp source kind.
+ * "all" returns the full list unchanged.
+ */
+function filterBySource(pages: ExportPage[], source: MarpSource): ExportPage[] {
+  if (source === "all") return pages;
+  return pages.filter((p) => p.kind === source);
+}
+
+/**
  * Build the Marp slide deck content from a list of export pages.
- * @param pages - Array of export pages to include (caller may pre-filter).
+ * @param pages - Array of all export pages.
  * @param projectTitle - Shown on the title slide.
+ * @param source - Which page kind(s) to include (default "all").
  * @returns Full Marp markdown string.
  */
-export function buildMarp(pages: ExportPage[], projectTitle: string): string {
+export function buildMarp(
+  pages: ExportPage[],
+  projectTitle: string,
+  source: MarpSource = "all",
+): string {
+  const filtered = filterBySource(pages, source);
+
   const frontmatter = [
     "---",
     "marp: true",
@@ -61,10 +90,10 @@ export function buildMarp(pages: ExportPage[], projectTitle: string): string {
     "",
     `# ${projectTitle}`,
     "",
-    `${pages.length} pages | ${new Date().toISOString()}`,
+    `${filtered.length} pages | ${new Date().toISOString()}`,
   ].join("\n");
 
-  const slides = pages.map((p) => `---\n\n${pageToSlide(p)}`);
+  const slides = filtered.map((p) => `---\n\n${pageToSlide(p)}`);
 
   return [frontmatter, titleSlide, ...slides, ""].join("\n\n");
 }

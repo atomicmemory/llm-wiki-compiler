@@ -6,12 +6,17 @@
  * the wikilink graph extracted from the body.
  */
 
+/** The wiki directory kind a page originates from. */
+export type PageKind = "concepts" | "queries";
+
 /** A fully-resolved wiki page ready for export serialisation. */
 export interface ExportPage {
   /** Human-readable page title (from frontmatter). */
   title: string;
   /** Filesystem slug (filename without .md). */
   slug: string;
+  /** Whether this page came from wiki/concepts or wiki/queries. */
+  kind: PageKind;
   /** One-line page summary (from frontmatter). */
   summary: string;
   /** Source filenames cited in the page body. */
@@ -27,6 +32,15 @@ export interface ExportPage {
   /** Full markdown body (without frontmatter). */
   body: string;
 }
+
+/**
+ * Source filter for marp export: which page kinds to include.
+ * "all" includes both concepts and queries (the default).
+ */
+export type MarpSource = "concepts" | "queries" | "all";
+
+/** All recognised marp source values — used for validation. */
+export const MARP_SOURCES: readonly MarpSource[] = ["concepts", "queries", "all"];
 
 /** Supported export target identifiers. */
 export type ExportTarget =

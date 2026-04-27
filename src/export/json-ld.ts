@@ -34,6 +34,11 @@ function pageToJsonLd(page: ExportPage): Record<string, unknown> {
     node["keywords"] = page.tags;
   }
 
+  // schema.org/isBasedOn is the standard property for citing source material.
+  if (page.sources.length > 0) {
+    node["isBasedOn"] = page.sources;
+  }
+
   if (page.links.length > 0) {
     node["mentions"] = page.links.map((slug) => ({ "@id": pageIri(slug) }));
   }
