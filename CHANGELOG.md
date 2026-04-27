@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-04-27
+
+Adds multimodal ingest (images, PDFs, transcripts) and chunk-level semantic retrieval with reranking and a `--debug` view. Also raises the minimum Node version to 24 so the project can use modern test-mocking tooling that depends on Node 24+ APIs.
+
+### Added
+
+- **Multimodal ingest** — `llmwiki ingest` now accepts images (vision via the active LLM provider), PDFs (text + metadata via lazy-loaded `pdf-parse`), and transcripts (`.vtt`, `.srt`, plus content-sniffed `.txt` that requires repeated speaker dialogue or anchored timestamps so plain notes aren't misclassified). Each source records its `sourceType` in frontmatter (`web` | `file` | `image` | `pdf` | `transcript`). YouTube transcript URLs are auto-routed.
+- **Chunk-level semantic retrieval** — the embedding store gained an optional v2 `chunks` schema. Pages are split on paragraph + heading boundaries (with size guardrails), embedded individually, and reused across compiles when their content hash hasn't changed. Query routing prefers chunk hits, falls back to page-level retrieval and full-index selection.
+- **BM25 reranking** over chunk candidates, blending 0.5x cosine similarity with BM25 score so semantic ranking still matters when the query has no overlapping terms.
+- **`llmwiki query --debug`** prints the top chunks (slug, score, snippet) and pages selected, so users can audit retrieval decisions. The MCP `query_wiki` tool accepts a `debug` arg too.
+- **Empty-store cold-start** — an empty v1 or v2 store with live wiki pages now triggers a full chunk embedding on next compile (previously, embeddings would only update when an existing slug changed).
+- **`@copilotkit/aimock` test infrastructure** with `mockClaudeEnv` / `mockOpenAIEnv` / `useAimockLifecycle` helpers. CLI subprocess tests can now stub LLM endpoints deterministically — closes the recurring "no subprocess test for the compile/query happy path" gap that codex flagged across review-queue, schema-layer, confidence-metadata, and chunked-retrieval.
+
+### Changed
+
+- **Minimum Node version raised from 18 to 24.** `engines.node` is `>=24`, the tsup target is `node24`, and CI runs only on Node 24. Users on older Node should pin to `<0.5.0` until they can upgrade their runtime.
+- `pdf-parse` is dynamically imported so the cost of loading pdfjs-dist is paid only when a PDF is actually being ingested.
+
+### Test infrastructure
+
+- New `runCLI` / `expectCLIExit` / `expectCLIFailure` / `formatCLIFailure` helpers in `test/fixtures/run-cli.ts` capture full subprocess diagnostics (code, signal, killed, message, stdout, stderr, args, cwd) on assertion failure — flakes now surface their root cause without rerunning.
+- `vitest globalSetup` builds dist once before the suite runs, eliminating the per-test `tsup --clean` race that caused intermittent CI flakes.
+- Tests grew from 391 to 477 in this release (and to 519 once export-bundle lands as a follow-up).
+
 ## [0.4.0] - 2026-04-25
 
 Adds claim-level source-range provenance, a first-class schema layer for typed page kinds, configurable provider request timeouts, and a slug-based wikilink format that resolves reliably in Obsidian.
