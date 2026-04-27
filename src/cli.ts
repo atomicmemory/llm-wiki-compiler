@@ -15,6 +15,7 @@ import queryCommand from "./commands/query.js";
 import watchCommand from "./commands/watch.js";
 import lintCommand from "./commands/lint.js";
 import exportCommand from "./commands/export.js";
+import { schemaInitCommand, schemaShowCommand } from "./commands/schema.js";
 import reviewListCommand from "./commands/review-list.js";
 import reviewShowCommand from "./commands/review-show.js";
 import reviewApproveCommand from "./commands/review-approve.js";
@@ -118,7 +119,8 @@ program
   .command("query <question>")
   .description("Ask a question against the wiki")
   .option("--save", "Save the answer as a wiki page")
-  .action(async (question: string, options: { save?: boolean }) => {
+  .option("--debug", "Print which pages and chunks were selected and their scores")
+  .action(async (question: string, options: { save?: boolean; debug?: boolean }) => {
     try {
       requireProvider();
       await queryCommand(process.cwd(), question, options);
@@ -147,6 +149,34 @@ program
   .action(async () => {
     try {
       await lintCommand();
+    } catch (err) {
+      console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
+      process.exit(1);
+    }
+  });
+
+const schemaCmd = program
+  .command("schema")
+  .description("Inspect or initialize the project's wiki schema config");
+
+schemaCmd
+  .command("init")
+  .description("Write a starter schema file to .llmwiki/schema.json")
+  .action(async () => {
+    try {
+      await schemaInitCommand();
+    } catch (err) {
+      console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
+      process.exit(1);
+    }
+  });
+
+schemaCmd
+  .command("show")
+  .description("Print the resolved schema for this project")
+  .action(async () => {
+    try {
+      await schemaShowCommand();
     } catch (err) {
       console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
       process.exit(1);

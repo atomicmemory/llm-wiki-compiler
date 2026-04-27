@@ -1,0 +1,16 @@
+WEBVTT
+
+00:00:01.000 --> 00:00:04.500
+Alice: Good morning everyone. Let's get started with the standup.
+
+00:00:05.000 --> 00:00:09.200
+Bob: Morning. Yesterday I finished the authentication module.
+
+00:00:10.000 --> 00:00:14.000
+Alice: Great work. Any blockers we should know about?
+
+00:00:14.500 --> 00:00:18.000
+Bob: None right now. I'll start on the dashboard today.
+
+00:00:18.500 --> 00:00:22.000
+Alice: Perfect. Let's sync again at end of day.

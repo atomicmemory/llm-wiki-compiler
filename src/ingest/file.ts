@@ -7,19 +7,10 @@
 
 import { readFile } from "fs/promises";
 import path from "path";
+import { titleFromFilename, type IngestedSource } from "./shared.js";
 
+/** Plain-text file extensions handled directly by this module. */
 const SUPPORTED_EXTENSIONS = new Set([".md", ".txt"]);
-
-interface FileIngestResult {
-  title: string;
-  content: string;
-}
-
-/** Derive a human-readable title from a filename (without extension). */
-function titleFromFilename(filePath: string): string {
-  const basename = path.basename(filePath, path.extname(filePath));
-  return basename.replace(/[-_]+/g, " ").trim();
-}
 
 /** Wrap plain text content in a markdown fenced block. */
 function wrapPlainText(text: string): string {
@@ -32,7 +23,7 @@ function wrapPlainText(text: string): string {
  * @returns An object with a title derived from the filename and the markdown content.
  * @throws On unsupported file type or read failure.
  */
-export default async function ingestFile(filePath: string): Promise<FileIngestResult> {
+export default async function ingestFile(filePath: string): Promise<IngestedSource> {
   const ext = path.extname(filePath).toLowerCase();
 
   if (!SUPPORTED_EXTENSIONS.has(ext)) {

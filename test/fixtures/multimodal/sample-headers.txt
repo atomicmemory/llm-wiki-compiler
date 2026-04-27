@@ -1,0 +1,3 @@
+Summary: The Q3 product review highlighted three major themes across engineering, design, and customer success.
+Details: Engineering shipped twelve features, reduced p99 latency by forty percent, and resolved all critical bugs from the previous quarter.
+Notes: The design team completed a full audit of the component library and standardised spacing and typography tokens across all surfaces.
