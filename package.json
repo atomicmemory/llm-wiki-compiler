@@ -4,7 +4,7 @@
   "description": "A knowledge compiler CLI — raw sources in, interlinked wiki out",
   "type": "module",
   "bin": {
-    "llmwiki": "./dist/cli.js"
+    "llmwiki": "dist/cli.js"
   },
   "scripts": {
     "build": "tsup",
