@@ -1,10 +1,10 @@
 {
   "name": "llm-wiki-compiler",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "A knowledge compiler CLI — raw sources in, interlinked wiki out",
   "type": "module",
   "bin": {
-    "llmwiki": "./dist/cli.js"
+    "llmwiki": "dist/cli.js"
   },
   "scripts": {
     "build": "tsup",
