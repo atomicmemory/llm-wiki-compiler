@@ -60,12 +60,13 @@ async function packProject(): Promise<PackedTarball> {
 }
 
 /**
- * Install a tarball into a fresh empty project. Deps resolve against the
- * live registry — no lockfile inheritance from llmwiki itself — so this
- * mirrors what `npm install -g llm-wiki-compiler` does for end users.
+ * Install a tarball into the given empty project directory. Deps resolve
+ * against the live registry — no lockfile inheritance from llmwiki itself
+ * — so this mirrors what `npm install -g llm-wiki-compiler` does for end
+ * users. Caller owns `root` lifecycle so an install failure still leaves
+ * a known directory for afterAll cleanup.
  */
-async function installTarball(tarballPath: string): Promise<string> {
-  const root = await mkdtemp(path.join(tmpdir(), "llmwiki-install-"));
+async function installTarballInto(root: string, tarballPath: string): Promise<string> {
   await writeFile(
     path.join(root, "package.json"),
     `${JSON.stringify({ name: "llmwiki-smoke", version: "1.0.0", private: true })}\n`,
@@ -81,14 +82,16 @@ async function installTarball(tarballPath: string): Promise<string> {
 const describeOrSkip = SHOULD_RUN ? describe : describe.skip;
 
 describeOrSkip("pack-and-install smoke", () => {
-  let tarball: PackedTarball;
-  let installRoot: string;
+  let tarball: PackedTarball | null = null;
+  let installRoot: string | null = null;
   let bin: string;
 
   beforeAll(async () => {
+    // Create both temp dirs upfront so afterAll can clean them up even
+    // when pack or install throws partway through.
+    installRoot = await mkdtemp(path.join(tmpdir(), "llmwiki-install-"));
     tarball = await packProject();
-    bin = await installTarball(tarball.path);
-    installRoot = path.dirname(path.dirname(path.dirname(bin)));
+    bin = await installTarballInto(installRoot, tarball.path);
   }, INSTALL_TIMEOUT_MS + 60_000);
 
   afterAll(async () => {
