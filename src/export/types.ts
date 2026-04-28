@@ -6,8 +6,15 @@
  * the wikilink graph extracted from the body.
  */
 
-/** The wiki directory kind a page originates from. */
-export type PageKind = "concepts" | "queries";
+/**
+ * Which wiki/ subdirectory a page lives in.
+ *
+ * Intentionally distinct from the schema layer's `PageKind`
+ * (concept/entity/comparison/overview) — this is a filesystem location, not
+ * a semantic typology. Renaming avoids field collision when JSON export and
+ * schema metadata are consumed by the same downstream tooling.
+ */
+export type PageDirectory = "concepts" | "queries";
 
 /** A fully-resolved wiki page ready for export serialisation. */
 export interface ExportPage {
@@ -16,7 +23,7 @@ export interface ExportPage {
   /** Filesystem slug (filename without .md). */
   slug: string;
   /** Whether this page came from wiki/concepts or wiki/queries. */
-  kind: PageKind;
+  pageDirectory: PageDirectory;
   /** One-line page summary (from frontmatter). */
   summary: string;
   /** Source filenames cited in the page body. */

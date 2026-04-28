@@ -455,4 +455,43 @@ describe("export CLI integration", () => {
       await cleanup(root);
     }
   }, 30_000);
+
+  it("marp --source queries CLI summary reports the filtered count, not the total", async () => {
+    const root = await makeTempWikiRoot("marp-source-summary");
+    try {
+      await writeFixtureWiki(root); // 2 concepts
+      await writeQueryPage(root); //  1 query
+      const result = await runExport(root, ["--target", "marp", "--source", "queries"]);
+      expectCLIExit(result, 0);
+      // 1 query should be reported, not the 3 collected pages.
+      expect(result.stdout).toContain("Done — 1 pages exported");
+      expect(result.stdout).not.toContain("Done — 3 pages exported");
+    } finally {
+      await cleanup(root);
+    }
+  }, 30_000);
+
+  // -------------------------------------------------------------------------
+  // JSON export: pageDirectory field rename (avoids collision with schema PageKind)
+  // -------------------------------------------------------------------------
+
+  it("wiki.json pages expose pageDirectory, not the legacy `kind` field", async () => {
+    const root = await makeTempWikiRoot("json-page-directory");
+    try {
+      await writeFixtureWiki(root);
+      await writeQueryPage(root);
+      const content = await runExportAndRead(root, "json", "wiki.json");
+      const doc = JSON.parse(content) as { pages: Array<Record<string, unknown>> };
+      const concept = doc.pages.find((p) => p.title === "Alpha Concept");
+      const query = doc.pages.find((p) => p.title === "Sample Query");
+      expect(concept?.pageDirectory).toBe("concepts");
+      expect(query?.pageDirectory).toBe("queries");
+      // Old field name should no longer be emitted — it conflicted with
+      // schema's PageKind ("concept"|"entity"|"comparison"|"overview").
+      expect(concept).not.toHaveProperty("kind");
+      expect(query).not.toHaveProperty("kind");
+    } finally {
+      await cleanup(root);
+    }
+  }, 30_000);
 });

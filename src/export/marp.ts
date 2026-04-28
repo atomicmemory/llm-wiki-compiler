@@ -6,8 +6,8 @@
  * becomes one slide showing the title, summary, tags, sources, timestamps,
  * and an excerpt of the body (first paragraph, up to a readable limit).
  *
- * The caller may pre-filter pages by kind ("concepts" | "queries" | "all")
- * using the --source option on the CLI.
+ * The caller may pre-filter pages by source directory ("concepts" |
+ * "queries" | "all") using the --source option on the CLI.
  *
  * Reference: https://marp.app/
  */
@@ -55,19 +55,19 @@ function pageToSlide(page: ExportPage): string {
 }
 
 /**
- * Filter pages by the requested marp source kind.
+ * Filter pages by the requested marp source directory.
  * "all" returns the full list unchanged.
  */
 function filterBySource(pages: ExportPage[], source: MarpSource): ExportPage[] {
   if (source === "all") return pages;
-  return pages.filter((p) => p.kind === source);
+  return pages.filter((p) => p.pageDirectory === source);
 }
 
 /**
  * Build the Marp slide deck content from a list of export pages.
  * @param pages - Array of all export pages.
  * @param projectTitle - Shown on the title slide.
- * @param source - Which page kind(s) to include (default "all").
+ * @param source - Which page directories to include (default "all").
  * @returns Full Marp markdown string.
  */
 export function buildMarp(

@@ -11,7 +11,7 @@ import path from "path";
 import { parseFrontmatter } from "../utils/markdown.js";
 import { slugify } from "../utils/markdown.js";
 import { CONCEPTS_DIR, QUERIES_DIR } from "../utils/constants.js";
-import type { ExportPage, PageKind } from "./types.js";
+import type { ExportPage, PageDirectory } from "./types.js";
 
 /** Regex that matches [[wikilink]] or [[wikilink|alias]] patterns. */
 const WIKILINK_RE = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
@@ -37,7 +37,7 @@ export function extractWikilinkSlugs(body: string): string[] {
 async function parsePageFile(
   filePath: string,
   slug: string,
-  kind: PageKind,
+  pageDirectory: PageDirectory,
 ): Promise<ExportPage | null> {
   let raw: string;
   try {
@@ -54,7 +54,7 @@ async function parsePageFile(
   return {
     title: meta.title,
     slug,
-    kind,
+    pageDirectory,
     summary: typeof meta.summary === "string" ? meta.summary : "",
     sources: Array.isArray(meta.sources)
       ? (meta.sources as unknown[]).filter((s): s is string => typeof s === "string")
@@ -72,9 +72,12 @@ async function parsePageFile(
 /**
  * Collect all valid ExportPage entries from a single wiki directory.
  * @param dirPath - Absolute path to a wiki page directory.
- * @param kind - The kind of pages in this directory.
+ * @param pageDirectory - Which wiki/ subdirectory the pages live in.
  */
-async function collectFromDir(dirPath: string, kind: PageKind): Promise<ExportPage[]> {
+async function collectFromDir(
+  dirPath: string,
+  pageDirectory: PageDirectory,
+): Promise<ExportPage[]> {
   let files: string[];
   try {
     files = await readdir(dirPath);
@@ -85,7 +88,7 @@ async function collectFromDir(dirPath: string, kind: PageKind): Promise<ExportPa
   const pages: ExportPage[] = [];
   for (const file of files.filter((f) => f.endsWith(".md"))) {
     const slug = file.replace(/\.md$/, "");
-    const page = await parsePageFile(path.join(dirPath, file), slug, kind);
+    const page = await parsePageFile(path.join(dirPath, file), slug, pageDirectory);
     if (page) pages.push(page);
   }
   return pages;

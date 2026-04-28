@@ -25,7 +25,7 @@ import { buildJsonLd } from "../export/json-ld.js";
 import { buildGraphml } from "../export/graphml.js";
 import { buildMarp } from "../export/marp.js";
 import { EXPORT_TARGETS, MARP_SOURCES } from "../export/types.js";
-import type { ExportTarget, MarpSource } from "../export/types.js";
+import type { ExportPage, ExportTarget, MarpSource } from "../export/types.js";
 
 const require = createRequire(import.meta.url);
 
@@ -116,6 +116,24 @@ function buildContent(
 }
 
 /**
+ * Compute the page count to report in the CLI summary. When marp is the
+ * only target and --source narrows the deck, report the filtered count so
+ * the summary doesn't overstate what was exported. Multi-target runs keep
+ * the collected total because non-marp targets always include every page.
+ */
+function computeReportedPageCount(
+  pages: ExportPage[],
+  targets: ExportTarget[],
+  marpSource: MarpSource,
+): number {
+  const onlyMarpTarget = targets.length === 1 && targets[0] === "marp";
+  if (onlyMarpTarget && marpSource !== "all") {
+    return pages.filter((p) => p.pageDirectory === marpSource).length;
+  }
+  return pages.length;
+}
+
+/**
  * Programmatic entry point for the export pipeline.
  * @param root - Absolute path to the project root directory.
  * @param options - Export options (optional target filter).
@@ -137,7 +155,7 @@ export async function runExport(root: string, options: ExportOptions = {}): Prom
     output.status("+", output.success(`Exported ${target} → ${output.source(outPath)}`));
   }
 
-  return { written, pageCount: pages.length };
+  return { written, pageCount: computeReportedPageCount(pages, targets, marpSource) };
 }
 
 /**

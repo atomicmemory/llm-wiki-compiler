@@ -4,7 +4,7 @@
  * Produces a machine-readable index per the llmstxt.org spec:
  *   - H1 project title
  *   - Optional blockquote description
- *   - H2-delimited sections per page kind (## Concepts, ## Saved Queries)
+ *   - H2-delimited sections per page directory (## Concepts, ## Saved Queries)
  *   - Bullet entries: [Title](path): summary | tags | sources | timestamps
  *
  * The companion llms-full.txt format appends the full body of every page
@@ -16,11 +16,11 @@
 import type { ExportPage } from "./types.js";
 
 /**
- * Build the wiki-relative path for a page based on its kind.
+ * Build the wiki-relative path for a page based on its source directory.
  * Concepts live in wiki/concepts/, queries in wiki/queries/.
  */
 function pageRelativePath(page: ExportPage): string {
-  return `wiki/${page.kind}/${page.slug}.md`;
+  return `wiki/${page.pageDirectory}/${page.slug}.md`;
 }
 
 /**
@@ -57,8 +57,8 @@ function buildSection(heading: string, pages: ExportPage[]): string[] {
  * @returns Full llms.txt string.
  */
 export function buildLlmsTxt(pages: ExportPage[], projectTitle: string): string {
-  const concepts = pages.filter((p) => p.kind === "concepts");
-  const queries = pages.filter((p) => p.kind === "queries");
+  const concepts = pages.filter((p) => p.pageDirectory === "concepts");
+  const queries = pages.filter((p) => p.pageDirectory === "queries");
 
   const lines: string[] = [
     `# ${projectTitle}`,

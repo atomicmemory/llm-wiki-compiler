@@ -364,11 +364,15 @@ Karpathy describes an abstract pattern for turning raw data into compiled knowle
 | Auto-recompile | `llmwiki watch` | Implemented |
 | Linting / health-check pass | `llmwiki lint` | Implemented |
 | Agent integration | `llmwiki serve` (MCP server) | Implemented |
-| Image support | — | Not yet implemented |
-| Marp slides | — | Not yet implemented |
+| Image support | `llmwiki ingest <image>` | Implemented |
+| Marp slides | `llmwiki export --target marp` | Implemented |
 | Fine-tuning | — | Not yet implemented |
 
 ## Roadmap
+
+Shipped in 0.6.0:
+
+- ✅ Export bundle (`llms.txt`, JSON, JSON-LD, GraphML, Marp slides)
 
 Shipped in 0.5.0:
 
@@ -397,7 +401,6 @@ Shipped in 0.2.0:
 
 Next up:
 
-- Export bundle (`llms.txt`, JSON, JSON-LD, GraphML, Marp)
 - Session-history adapters (Claude, Codex, Cursor exports)
 
 Future ideas (open to discussion):
