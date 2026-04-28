@@ -248,7 +248,19 @@ async function fetchContent(
 
 /** Write the ingested document to the sources/ directory. */
 async function saveSource(title: string, document: string): Promise<string> {
-  const filename = `${slugify(title)}.md`;
+  const slug = slugify(title);
+  // Defense in depth — even with the Unicode-aware slugifier, a title made
+  // entirely of punctuation/emoji/symbols still slugifies to "". Without
+  // this guard the file would be written to sources/.md (a dotfile that's
+  // easy to miss and that subsequent empty-slug ingests would overwrite).
+  if (!slug) {
+    throw new Error(
+      `Could not derive a filename from title "${title}". ` +
+        `The title contains no letter or number characters. ` +
+        `Rename the source file to one with at least one letter or digit.`,
+    );
+  }
+  const filename = `${slug}.md`;
   const destPath = path.join(SOURCES_DIR, filename);
 
   await mkdir(SOURCES_DIR, { recursive: true });
