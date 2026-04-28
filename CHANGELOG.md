@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-04-27
+
+Patch release fixing a CLI startup crash that broke 0.5.0 for everyone installing via npm.
+
+### Fixed
+
+- **Startup crash on `llmwiki <any-command>`** — 0.5.0 imported `youtube-transcript/dist/youtube-transcript.esm.js` (a deep subpath that worked around a broken `main` entry in v1.3.0). v1.3.1 added a proper `exports` map that no longer exposes that subpath, so any `npm install -g llm-wiki-compiler@0.5.0` produced `ERR_PACKAGE_PATH_NOT_EXPORTED` on first command. Switched to importing from the package root (which the new `exports` map covers) and bumped `youtube-transcript` to `^1.3.1`.
+
+### Contributors
+
+Thanks to **@lllcccwww** for reporting (#33) and **@ishan5ain** for the fix (#34) — both very fast turnarounds.
+
 ## [0.5.0] - 2026-04-27
 
 Adds multimodal ingest (images, PDFs, transcripts) and chunk-level semantic retrieval with reranking and a `--debug` view. Also raises the minimum Node version to 24 so the project can use modern test-mocking tooling that depends on Node 24+ APIs.
