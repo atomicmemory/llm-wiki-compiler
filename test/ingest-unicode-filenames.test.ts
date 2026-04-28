@@ -38,32 +38,40 @@ async function makeWorkspace(fixtureName: string, content: string): Promise<{
   return { cwd, fixturePath };
 }
 
+/**
+ * Run a single non-ASCII ingest and assert the output filename in
+ * sources/ matches what the Unicode-aware slugifier should produce. The
+ * shared helper exists to keep the per-script test cases byte-light and
+ * to avoid duplicate-code findings from the per-script smoke tests.
+ */
+async function expectIngestProducesUnicodeFilename(
+  fixtureName: string,
+  fixtureContent: string,
+  expectedSourcesEntry: string,
+): Promise<void> {
+  const { cwd, fixturePath } = await makeWorkspace(fixtureName, fixtureContent);
+  const result = await runCLI(["ingest", fixturePath], cwd);
+  expectCLIExit(result, 0);
+  const files = await readdir(path.join(cwd, "sources"));
+  expect(files).toEqual([expectedSourcesEntry]);
+}
+
 describe("ingest — non-ASCII filenames (#35)", () => {
   it("CJK-named file is written under sources/ with a Unicode slug", async () => {
-    const { cwd, fixturePath } = await makeWorkspace(
+    // Exactly one file, named after the CJK title — not the silent ".md" dotfile.
+    await expectIngestProducesUnicodeFilename(
       "测试文档.md",
       "# 测试\n\nThis is a Chinese-titled document.",
+      "测试文档.md",
     );
-
-    const result = await runCLI(["ingest", fixturePath], cwd);
-    expectCLIExit(result, 0);
-
-    const files = await readdir(path.join(cwd, "sources"));
-    // Exactly one file, named after the CJK title — not the silent ".md" dotfile.
-    expect(files).toEqual(["测试文档.md"]);
   });
 
   it("Japanese-named file is written under sources/ with the original characters", async () => {
-    const { cwd, fixturePath } = await makeWorkspace(
+    await expectIngestProducesUnicodeFilename(
       "こんにちは.md",
       "# こんにちは\n\nA Japanese-titled document.",
+      "こんにちは.md",
     );
-
-    const result = await runCLI(["ingest", fixturePath], cwd);
-    expectCLIExit(result, 0);
-
-    const files = await readdir(path.join(cwd, "sources"));
-    expect(files).toEqual(["こんにちは.md"]);
   });
 
   it("two distinct CJK-named files do not collide on sources/.md", async () => {
