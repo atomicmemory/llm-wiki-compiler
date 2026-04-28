@@ -53,8 +53,13 @@ program
     "--review",
     "Write generated pages as review candidates under .llmwiki/candidates/ instead of mutating wiki/. Orphan-marking for deleted sources is deferred until the next non-review compile.",
   )
-  .action(async (options: { review?: boolean }) => {
+  .option(
+    "--lang <code>",
+    "Target language for generated wiki content (e.g. \"Chinese\", \"ja\", \"zh-CN\"). Equivalent to setting LLMWIKI_OUTPUT_LANG.",
+  )
+  .action(async (options: { review?: boolean; lang?: string }) => {
     try {
+      applyLanguageOption(options.lang);
       requireProvider();
       await compileCommand({ review: options.review });
     } catch (err) {
@@ -120,15 +125,25 @@ program
   .description("Ask a question against the wiki")
   .option("--save", "Save the answer as a wiki page")
   .option("--debug", "Print which pages and chunks were selected and their scores")
-  .action(async (question: string, options: { save?: boolean; debug?: boolean }) => {
-    try {
-      requireProvider();
-      await queryCommand(process.cwd(), question, options);
-    } catch (err) {
-      console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
-      process.exit(1);
-    }
-  });
+  .option(
+    "--lang <code>",
+    "Target language for the answer (e.g. \"Chinese\", \"ja\", \"zh-CN\"). Equivalent to setting LLMWIKI_OUTPUT_LANG.",
+  )
+  .action(
+    async (
+      question: string,
+      options: { save?: boolean; debug?: boolean; lang?: string },
+    ) => {
+      try {
+        applyLanguageOption(options.lang);
+        requireProvider();
+        await queryCommand(process.cwd(), question, options);
+      } catch (err) {
+        console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
+        process.exit(1);
+      }
+    },
+  );
 
 program
   .command("watch")
@@ -214,6 +229,17 @@ program
       process.exit(1);
     }
   });
+
+/**
+ * Apply the --lang CLI option by setting LLMWIKI_OUTPUT_LANG so prompt
+ * builders pick it up (issue #37). Single env slot keeps the resolution
+ * order simple: explicit flag wins over the inherited environment.
+ */
+function applyLanguageOption(lang: string | undefined): void {
+  if (lang && lang.trim().length > 0) {
+    process.env.LLMWIKI_OUTPUT_LANG = lang.trim();
+  }
+}
 
 /** API key env var required per provider. Null means no key needed. */
 const PROVIDER_KEY_VARS: Record<string, string | null> = {

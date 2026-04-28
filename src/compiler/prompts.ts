@@ -11,6 +11,18 @@ import type {
   ProvenanceState,
 } from "../utils/types.js";
 import type { PageKindRule, SeedPage } from "../schema/index.js";
+import { languageDirective } from "../utils/output-language.js";
+
+/**
+ * Build a list of optional prompt lines, omitting empty entries so the
+ * default-case prompt is byte-identical to the previous version. Used by
+ * the prompt builders to splice in the output-language directive only
+ * when the user opted in.
+ */
+function withLangLine(...lines: string[]): string[] {
+  const lang = languageDirective();
+  return lang ? [...lines, lang] : lines;
+}
 
 /** Allowed provenance state strings emitted by the LLM tool schema. */
 const PROVENANCE_STATE_VALUES: ProvenanceState[] = [
@@ -106,11 +118,13 @@ export function buildExtractionPrompt(
     : "\n\nNo existing wiki pages yet.";
 
   return [
-    "You are a knowledge extraction engine. Analyze the following source document",
-    "and identify 3-8 distinct, meaningful concepts worth documenting as wiki pages.",
-    "Each concept should be a standalone topic that someone might look up.",
-    "Focus on key ideas, techniques, patterns, or entities — not trivial details.",
-    "Use the extract_concepts tool to return your findings.",
+    ...withLangLine(
+      "You are a knowledge extraction engine. Analyze the following source document",
+      "and identify 3-8 distinct, meaningful concepts worth documenting as wiki pages.",
+      "Each concept should be a standalone topic that someone might look up.",
+      "Focus on key ideas, techniques, patterns, or entities — not trivial details.",
+      "Use the extract_concepts tool to return your findings.",
+    ),
     "",
     "For every concept, emit provenance metadata so downstream tools can reason",
     "about reliability:",
@@ -152,11 +166,13 @@ export function buildPagePrompt(
     : "";
 
   return [
-    `You are a wiki author. Write a clear, well-structured markdown page about "${concept}".`,
-    "Draw facts only from the provided source material.",
-    "Include a ## Sources section at the end listing the source document.",
-    "Suggest [[wikilinks]] to related concepts where appropriate.",
-    "Write in a neutral, informative tone. Be concise but thorough.",
+    ...withLangLine(
+      `You are a wiki author. Write a clear, well-structured markdown page about "${concept}".`,
+      "Draw facts only from the provided source material.",
+      "Include a ## Sources section at the end listing the source document.",
+      "Suggest [[wikilinks]] to related concepts where appropriate.",
+      "Write in a neutral, informative tone. Be concise but thorough.",
+    ),
     "",
     "Source attribution: at the end of each prose paragraph, append a citation",
     "marker showing which source file(s) the paragraph drew from.",
@@ -258,12 +274,14 @@ export function buildSeedPagePrompt(
     ? `Include at least ${minLinks} [[wikilinks]] to related pages.`
     : "Use [[wikilinks]] when referencing other pages.";
   return [
-    `You are a wiki author. Write a ${seed.kind} page titled "${seed.title}".`,
-    `Page-kind guidance: ${rule.description}`,
-    `Summary line for context: ${seed.summary}`,
-    "Draw facts only from the related wiki pages provided below.",
-    linkExpectation,
-    "Write in a neutral, informative tone. Be concise but thorough.",
+    ...withLangLine(
+      `You are a wiki author. Write a ${seed.kind} page titled "${seed.title}".`,
+      `Page-kind guidance: ${rule.description}`,
+      `Summary line for context: ${seed.summary}`,
+      "Draw facts only from the related wiki pages provided below.",
+      linkExpectation,
+      "Write in a neutral, informative tone. Be concise but thorough.",
+    ),
     "\n\n--- RELATED PAGES ---\n\n",
     relatedPagesContent,
   ].join("\n");

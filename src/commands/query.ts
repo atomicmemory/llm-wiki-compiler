@@ -16,6 +16,7 @@ import path from "path";
 import { callClaude } from "../utils/llm.js";
 import type { LLMTool } from "../utils/provider.js";
 import { atomicWrite, safeReadFile, slugify, buildFrontmatter, parseFrontmatter } from "../utils/markdown.js";
+import { languageDirective } from "../utils/output-language.js";
 import { generateIndex } from "../compiler/indexgen.js";
 import * as output from "../utils/output.js";
 import {
@@ -302,11 +303,20 @@ export async function loadSelectedPages(root: string, slugs: string[]): Promise<
   return sections.join("\n\n");
 }
 
-/** Shared system prompt for the answer-generation step. */
-const ANSWER_SYSTEM_PROMPT =
+/** Base system prompt body. The output-language directive is appended at call time. */
+const ANSWER_SYSTEM_PROMPT_BASE =
   "You are a knowledge assistant. Answer the question using ONLY the wiki content provided. " +
   "Cite specific pages using [[Page Title]] wikilinks. " +
   "If the wiki doesn't contain enough information, say so.";
+
+/**
+ * Build the answer-generation system prompt, appending the configured
+ * output-language directive when present (issue #37).
+ */
+function buildAnswerSystemPrompt(): string {
+  const lang = languageDirective();
+  return lang ? `${ANSWER_SYSTEM_PROMPT_BASE} ${lang}` : ANSWER_SYSTEM_PROMPT_BASE;
+}
 
 /**
  * Call the LLM with the loaded wiki pages as grounding context. When chunk
@@ -324,7 +334,7 @@ async function callAnswerLLM(
   const userMessage =
     `Question: ${question}\n\nRelevant wiki pages:\n${pagesContent}${provenance}`;
   return callClaude({
-    system: ANSWER_SYSTEM_PROMPT,
+    system: buildAnswerSystemPrompt(),
     messages: [{ role: "user", content: userMessage }],
     stream: Boolean(onToken),
     onToken,
