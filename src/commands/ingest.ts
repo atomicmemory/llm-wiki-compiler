@@ -11,7 +11,8 @@
 
 import path from "path";
 import { mkdir, readFile, writeFile } from "fs/promises";
-import { slugify, buildFrontmatter } from "../utils/markdown.js";
+import { createHash } from "crypto";
+import { slugify, buildFrontmatter, parseFrontmatter } from "../utils/markdown.js";
 import { MAX_SOURCE_CHARS, MIN_SOURCE_CHARS, SOURCES_DIR, IMAGE_EXTENSIONS, TRANSCRIPT_EXTENSIONS } from "../utils/constants.js";
 import * as output from "../utils/output.js";
 import ingestWeb from "../ingest/web.js";
@@ -246,11 +247,53 @@ async function fetchContent(
   }
 }
 
+/** Length of the hex hash suffix appended to disambiguate basename collisions. */
+const COLLISION_HASH_LEN = 8;
+
+/**
+ * Compute a short, stable hex hash of a source identifier. Used to
+ * disambiguate filenames when two distinct sources slugify to the same
+ * basename (issue #36). Stability matters: re-ingesting the same source
+ * must always produce the same hash so we overwrite cleanly instead of
+ * accumulating duplicates.
+ */
+function shortHashOfSource(source: string): string {
+  return createHash("sha256").update(source).digest("hex").slice(0, COLLISION_HASH_LEN);
+}
+
+/**
+ * Resolve a final filename for the given slug and source identity.
+ *
+ * - When `${slug}.md` does not exist, return `${slug}.md`.
+ * - When `${slug}.md` exists and its frontmatter `source` matches the
+ *   incoming source, return `${slug}.md` so re-ingest stays idempotent.
+ * - Otherwise return `${slug}-<hash>.md` so two distinct sources that
+ *   share a basename coexist instead of one silently overwriting the
+ *   other (issue #36).
+ */
+async function resolveCollisionFreeFilename(slug: string, source: string): Promise<string> {
+  const candidate = `${slug}.md`;
+  const candidatePath = path.join(SOURCES_DIR, candidate);
+  let existing: string;
+  try {
+    existing = await readFile(candidatePath, "utf-8");
+  } catch (err) {
+    const e = err as { code?: string };
+    if (e.code === "ENOENT") return candidate;
+    throw err;
+  }
+  const { meta } = parseFrontmatter(existing);
+  if (typeof meta.source === "string" && meta.source === source) {
+    return candidate;
+  }
+  return `${slug}-${shortHashOfSource(source)}.md`;
+}
+
 /** Write the ingested document to the sources/ directory. */
-async function saveSource(title: string, document: string): Promise<string> {
+async function saveSource(title: string, document: string, source: string): Promise<string> {
   const slug = slugify(title);
-  // Defense in depth — even with the Unicode-aware slugifier, a title made
-  // entirely of punctuation/emoji/symbols still slugifies to "". Without
+  // Defense in depth — even with the Unicode-aware slugifier (#35), a title
+  // made entirely of punctuation/emoji/symbols still slugifies to "". Without
   // this guard the file would be written to sources/.md (a dotfile that's
   // easy to miss and that subsequent empty-slug ingests would overwrite).
   if (!slug) {
@@ -260,12 +303,10 @@ async function saveSource(title: string, document: string): Promise<string> {
         `Rename the source file to one with at least one letter or digit.`,
     );
   }
-  const filename = `${slug}.md`;
-  const destPath = path.join(SOURCES_DIR, filename);
-
   await mkdir(SOURCES_DIR, { recursive: true });
+  const filename = await resolveCollisionFreeFilename(slug, source);
+  const destPath = path.join(SOURCES_DIR, filename);
   await writeFile(destPath, document, "utf-8");
-
   return destPath;
 }
 
@@ -286,7 +327,7 @@ export async function ingestSource(source: string): Promise<IngestResult> {
   const result = enforceCharLimit(content);
   enforceMinContent(result.content);
   const document = buildDocument(title, source, result, sourceType);
-  const savedPath = await saveSource(title, document);
+  const savedPath = await saveSource(title, document, source);
 
   return {
     filename: path.basename(savedPath),
