@@ -98,28 +98,43 @@ function findPageGenerationSystemPrompt(handle: MockClaudeHandle): string | null
   return null;
 }
 
+/**
+ * Stage the multi-source workspace and run a single `compile --review`
+ * subprocess against the shared-concept extraction stub. Centralised so
+ * each test reads as the assertion that distinguishes it (budget set vs
+ * not) rather than the boilerplate they share.
+ */
+async function runSharedConceptCompile(
+  envOverrides: NodeJS.ProcessEnv,
+): Promise<{
+  result: import("./fixtures/run-cli.js").CLIResult;
+  systemPrompt: string;
+  handle: MockClaudeHandle;
+}> {
+  const handle = await aimock.start();
+  stubSharedConceptExtraction(handle);
+  const cwd = await makeMultiSourceWorkspace();
+  const result = await runCLI(["compile", "--review"], cwd, {
+    ...mockClaudeEnv(handle),
+    ...envOverrides,
+  });
+  expectCLIExit(result, 0);
+  const systemPrompt = findPageGenerationSystemPrompt(handle);
+  expect(systemPrompt, "page-generation system prompt should be recorded").not.toBeNull();
+  return { result, systemPrompt: systemPrompt!, handle };
+}
+
 describe("prompt blowup defence (#39)", () => {
   it("compile bounds the page prompt and emits the truncation marker", async () => {
-    const handle = await aimock.start();
-    stubSharedConceptExtraction(handle);
-
-    const cwd = await makeMultiSourceWorkspace();
-    const result = await runCLI(["compile", "--review"], cwd, {
-      ...mockClaudeEnv(handle),
+    const { result, systemPrompt } = await runSharedConceptCompile({
       LLMWIKI_PROMPT_BUDGET_CHARS: TIGHT_BUDGET,
     });
-    expectCLIExit(result, 0);
-
-    const systemPrompt = findPageGenerationSystemPrompt(handle);
-    expect(systemPrompt, "page-generation system prompt should be recorded").not.toBeNull();
 
     // Bounded: well under the unbudgeted total (5 × 4,000 = 20,000 chars of source
     // content alone, plus prompt boilerplate). With a 5,000-char budget we expect
     // the source-content portion to land near 5k; the whole prompt stays well under
     // the unbudgeted ~20k+ blowup.
-    expect(systemPrompt!.length).toBeLessThan(15_000);
-
-    // The truncation marker must be present — proves budgeting ran.
+    expect(systemPrompt.length).toBeLessThan(15_000);
     expect(systemPrompt).toContain("truncated for prompt budget");
 
     // All five source headers are still represented (fair-share, not first-N-only).
@@ -133,15 +148,7 @@ describe("prompt blowup defence (#39)", () => {
   }, 60_000);
 
   it("compile without an explicit budget keeps the prompt unbudgeted (no truncation marker)", async () => {
-    const handle = await aimock.start();
-    stubSharedConceptExtraction(handle);
-
-    const cwd = await makeMultiSourceWorkspace();
-    const result = await runCLI(["compile", "--review"], cwd, mockClaudeEnv(handle));
-    expectCLIExit(result, 0);
-
-    const systemPrompt = findPageGenerationSystemPrompt(handle);
-    expect(systemPrompt).not.toBeNull();
+    const { systemPrompt } = await runSharedConceptCompile({});
     // 5 × 4,000 = 20,000 raw source chars — well under the 200,000-char default
     // budget, so the prompt should NOT carry the truncation marker.
     expect(systemPrompt).not.toContain("truncated for prompt budget");
@@ -149,14 +156,9 @@ describe("prompt blowup defence (#39)", () => {
 
   // The shared-concept slug should land under the configured concept directory.
   it("compile produces exactly one merged candidate for the shared concept", async () => {
-    const handle = await aimock.start();
-    stubSharedConceptExtraction(handle);
-    const cwd = await makeMultiSourceWorkspace();
-    const result = await runCLI(["compile", "--review"], cwd, {
-      ...mockClaudeEnv(handle),
+    const { result } = await runSharedConceptCompile({
       LLMWIKI_PROMPT_BUDGET_CHARS: TIGHT_BUDGET,
     });
-    expectCLIExit(result, 0);
     expect(result.stdout).toContain(SHARED_CONCEPT_SLUG);
   }, 60_000);
 });
