@@ -44,6 +44,7 @@ import {
 import { markOrphaned, orphanUnownedFrozenPages } from "./orphan.js";
 import { resolveLinks } from "./resolver.js";
 import { generateIndex } from "./indexgen.js";
+import { buildBudgetedCombinedContent, type SourceSlice } from "./prompt-budget.js";
 import { addObsidianMeta, generateMOC } from "./obsidian.js";
 import { updateEmbeddings } from "../utils/embeddings.js";
 import { writeCandidate } from "./candidates.js";
@@ -462,12 +463,19 @@ export function reconcileConceptMetadata(
  * contributing material rather than just the last source processed.
  * Metadata is reconciled across all contributing concepts via
  * reconcileConceptMetadata so contradictions from later sources are not lost.
+ *
+ * Combined content is then run through {@link buildBudgetedCombinedContent}
+ * so popular concepts that appear in many overlapping sources do not blow
+ * past the LLM provider's context window (issue #39). When the raw total
+ * fits the budget, the output is byte-identical to the previous unbudgeted
+ * concatenation.
  */
 function mergeExtractions(
   extractions: ExtractionResult[],
   frozenSlugs: Set<string>,
 ): MergedConcept[] {
   const bySlug = new Map<string, MergedConcept>();
+  const slicesBySlug = new Map<string, SourceSlice[]>();
 
   for (const result of extractions) {
     if (result.concepts.length === 0) continue;
@@ -480,16 +488,28 @@ function mergeExtractions(
       if (existing) {
         existing.concept = reconcileConceptMetadata(existing.concept, concept);
         existing.sourceFiles.push(result.sourceFile);
-        existing.combinedContent += `\n\n--- SOURCE: ${result.sourceFile} ---\n\n${result.sourceContent}`;
       } else {
         bySlug.set(slug, {
           slug,
           concept,
           sourceFiles: [result.sourceFile],
-          combinedContent: `--- SOURCE: ${result.sourceFile} ---\n\n${result.sourceContent}`,
+          combinedContent: "",
         });
+        slicesBySlug.set(slug, []);
       }
+      slicesBySlug.get(slug)!.push({
+        file: result.sourceFile,
+        content: result.sourceContent,
+      });
     }
+  }
+
+  for (const merged of bySlug.values()) {
+    const slices = slicesBySlug.get(merged.slug) ?? [];
+    merged.combinedContent = buildBudgetedCombinedContent(
+      merged.concept.concept,
+      slices,
+    );
   }
 
   return Array.from(bySlug.values());

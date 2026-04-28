@@ -9,6 +9,25 @@ export const MAX_SOURCE_CHARS = 100_000;
 /** Minimum source content length to ingest without a warning. */
 export const MIN_SOURCE_CHARS = 50;
 
+/**
+ * Default character budget for the combined source content sent to the LLM
+ * during page generation for a single concept (issue #39).
+ *
+ * Caps the per-prompt content at ~200,000 chars (~50k tokens). When two or
+ * more sources contribute to the same concept and their combined raw size
+ * exceeds this budget, each source's slice is proportionally truncated so
+ * the prompt fits the model's context window. Without this cap, popular
+ * concepts that appear in many overlapping documents reliably blow past
+ * the LLM provider's context limit and the compile crashes.
+ *
+ * Override via the LLMWIKI_PROMPT_BUDGET_CHARS env var when running against
+ * larger-context (raise) or smaller-context (lower) models.
+ */
+export const DEFAULT_PROMPT_BUDGET_CHARS = 200_000;
+
+/** Env var that overrides DEFAULT_PROMPT_BUDGET_CHARS at runtime. */
+export const PROMPT_BUDGET_ENV_VAR = "LLMWIKI_PROMPT_BUDGET_CHARS";
+
 /** Number of most relevant wiki pages to load for query context. */
 export const QUERY_PAGE_LIMIT = 5;
 
