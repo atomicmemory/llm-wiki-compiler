@@ -50,7 +50,12 @@ npx tsc --noEmit   # Type-check
 npm run build       # Build
 npm test            # Tests
 npx fallow          # Codebase health (dead code, duplication, complexity)
+npm run fallow:ci   # Run fallow scoped to changes since origin/main (matches CI args)
 ```
+
+**A note on `npm run fallow:ci`:** the `codebase-health` job in CI passes `--changed-since <PR-base-sha>` so it scopes analysis to the diff. `npm run fallow:ci` mirrors that locally by computing `git merge-base origin/main HEAD`. It catches most of what CI would flag before you push.
+
+There is one known parity gap: fallow's clone-detection occasionally returns different results across platforms (CI Linux x64 vs macOS arm64). When CI flags a clone you can't reproduce locally, dedupe by intent and re-push — it's not a bug in your branch.
 
 ### Code Style
 

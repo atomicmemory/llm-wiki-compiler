@@ -11,6 +11,7 @@
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
+    "fallow:ci": "bash scripts/fallow-ci.sh",
     "prepublishOnly": "npm run build && npm test",
     "prepare": "husky"
   },
