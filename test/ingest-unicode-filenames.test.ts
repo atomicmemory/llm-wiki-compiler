@@ -11,32 +11,14 @@
  * what the user actually observes after running `llmwiki ingest`.
  */
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import path from "path";
-import { mkdtemp, rm, writeFile, readdir } from "fs/promises";
-import { tmpdir } from "os";
+import { readdir, writeFile } from "fs/promises";
 import { runCLI, expectCLIExit, expectCLIFailure } from "./fixtures/run-cli.js";
+import { useIngestWorkspaces } from "./fixtures/ingest-workspace.js";
 
-const tempDirs: string[] = [];
-
-afterEach(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop();
-    if (dir) await rm(dir, { recursive: true, force: true });
-  }
-});
-
-/** Create a temp workspace and write a fixture file with the given name. */
-async function makeWorkspace(fixtureName: string, content: string): Promise<{
-  cwd: string;
-  fixturePath: string;
-}> {
-  const cwd = await mkdtemp(path.join(tmpdir(), "llmwiki-unicode-ingest-"));
-  tempDirs.push(cwd);
-  const fixturePath = path.join(cwd, fixtureName);
-  await writeFile(fixturePath, content, "utf-8");
-  return { cwd, fixturePath };
-}
+const workspaces = useIngestWorkspaces("unicode-ingest");
+const makeWorkspace = workspaces.makeWorkspace;
 
 /**
  * Run a single non-ASCII ingest and assert the output filename in

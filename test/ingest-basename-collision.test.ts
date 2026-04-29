@@ -11,20 +11,13 @@
  * source, while keeping re-ingest of the same source idempotent.
  */
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import path from "path";
-import { mkdtemp, mkdir, rm, writeFile, readdir, readFile } from "fs/promises";
-import { tmpdir } from "os";
+import { mkdir, writeFile, readdir, readFile } from "fs/promises";
 import { runCLI, expectCLIExit } from "./fixtures/run-cli.js";
+import { useIngestWorkspaces } from "./fixtures/ingest-workspace.js";
 
-const tempDirs: string[] = [];
-
-afterEach(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop();
-    if (dir) await rm(dir, { recursive: true, force: true });
-  }
-});
+const workspaces = useIngestWorkspaces("collision");
 
 /** Make a workspace and write two same-basename files in distinct sub-dirs. */
 async function makeCollidingWorkspace(): Promise<{
@@ -32,8 +25,7 @@ async function makeCollidingWorkspace(): Promise<{
   pathA: string;
   pathB: string;
 }> {
-  const cwd = await mkdtemp(path.join(tmpdir(), "llmwiki-collision-"));
-  tempDirs.push(cwd);
+  const cwd = await workspaces.makeEmptyWorkspace();
   await mkdir(path.join(cwd, "a"), { recursive: true });
   await mkdir(path.join(cwd, "b"), { recursive: true });
   const pathA = path.join(cwd, "a", "notes.md");
