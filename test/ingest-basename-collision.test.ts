@@ -35,6 +35,19 @@ async function makeCollidingWorkspace(): Promise<{
   return { cwd, pathA, pathB };
 }
 
+/**
+ * Assert sources/ holds exactly the bare basename plus one hash-suffixed
+ * sibling. The shape `notes.md + notes-<8 hex>.md` is the public contract
+ * for collision disambiguation, used by every test that exercises it.
+ */
+async function expectBareAndHashedNotes(cwd: string): Promise<string[]> {
+  const files = (await readdir(path.join(cwd, "sources"))).sort();
+  expect(files.length).toBe(2);
+  expect(files).toContain("notes.md");
+  expect(files.some((f) => /^notes-[0-9a-f]{8}\.md$/.test(f))).toBe(true);
+  return files;
+}
+
 describe("ingest — basename collision (#36)", () => {
   it("two distinct sources with the same basename produce two distinct files", async () => {
     const { cwd, pathA, pathB } = await makeCollidingWorkspace();
@@ -44,11 +57,7 @@ describe("ingest — basename collision (#36)", () => {
     const r2 = await runCLI(["ingest", pathB], cwd);
     expectCLIExit(r2, 0);
 
-    const files = (await readdir(path.join(cwd, "sources"))).sort();
-    expect(files.length).toBe(2);
-    // First write keeps the bare basename; second write gets a stable hash suffix.
-    expect(files).toContain("notes.md");
-    expect(files.some((f) => /^notes-[0-9a-f]{8}\.md$/.test(f))).toBe(true);
+    const files = await expectBareAndHashedNotes(cwd);
 
     // Both contents are present — no silent overwrite.
     const contents = await Promise.all(
@@ -103,10 +112,7 @@ describe("ingest — basename collision (#36)", () => {
     const result = await runCLI(["ingest", pathA], cwd);
     expectCLIExit(result, 0);
 
-    const files = (await readdir(path.join(cwd, "sources"))).sort();
-    expect(files.length).toBe(2);
-    expect(files).toContain("notes.md");
-    expect(files.some((f) => /^notes-[0-9a-f]{8}\.md$/.test(f))).toBe(true);
+    await expectBareAndHashedNotes(cwd);
 
     // The pre-existing file is preserved verbatim — no silent overwrite.
     const original = await readFile(path.join(cwd, "sources", "notes.md"), "utf-8");
