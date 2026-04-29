@@ -84,4 +84,32 @@ describe("ingest — basename collision (#36)", () => {
 
     expect(secondRun).toEqual(firstRun);
   });
+
+  // Edge case: an existing sources/X.md without llmwiki frontmatter (or with
+  // missing `source` field) should never be silently overwritten — the
+  // resolver must fall through to the hash suffix path.
+  it("falls through cleanly when an existing same-basename file is malformed", async () => {
+    const { cwd, pathA } = await makeCollidingWorkspace();
+
+    // Pre-seed sources/notes.md with a file that has no llmwiki frontmatter
+    // at all — could be a user's hand-written file or stray content.
+    await mkdir(path.join(cwd, "sources"), { recursive: true });
+    await writeFile(
+      path.join(cwd, "sources", "notes.md"),
+      "Pre-existing notes with no frontmatter.\n",
+      "utf-8",
+    );
+
+    const result = await runCLI(["ingest", pathA], cwd);
+    expectCLIExit(result, 0);
+
+    const files = (await readdir(path.join(cwd, "sources"))).sort();
+    expect(files.length).toBe(2);
+    expect(files).toContain("notes.md");
+    expect(files.some((f) => /^notes-[0-9a-f]{8}\.md$/.test(f))).toBe(true);
+
+    // The pre-existing file is preserved verbatim — no silent overwrite.
+    const original = await readFile(path.join(cwd, "sources", "notes.md"), "utf-8");
+    expect(original).toBe("Pre-existing notes with no frontmatter.\n");
+  });
 });
