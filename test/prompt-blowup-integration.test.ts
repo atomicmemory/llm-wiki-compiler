@@ -20,6 +20,7 @@ import { describe, it, expect } from "vitest";
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 import {
+  findSystemPromptByUserMessage,
   mockClaudeEnv,
   useAimockLifecycle,
   type MockClaudeHandle,
@@ -76,26 +77,16 @@ async function makeMultiSourceWorkspace(): Promise<string> {
   return cwd;
 }
 
-/** Pull the single page-generation system prompt out of aimock's recording. */
+/**
+ * Pull the single page-generation system prompt out of aimock's recording.
+ * The page-generation request is the one whose user message asks for a
+ * wiki page for our shared concept (the extraction request asks to
+ * "Extract the key concepts" instead), so the predicate disambiguates.
+ */
 function findPageGenerationSystemPrompt(handle: MockClaudeHandle): string | null {
-  const requests = handle.mock.getRequests() as Array<{ body?: unknown }>;
-  for (const req of requests) {
-    const body = req.body as { messages?: unknown } | undefined;
-    if (!Array.isArray(body?.messages)) continue;
-    let systemPrompt = "";
-    let userPrompt = "";
-    for (const msg of body.messages as Array<{ role?: unknown; content?: unknown }>) {
-      if (msg.role === "system" && typeof msg.content === "string") systemPrompt = msg.content;
-      if (msg.role === "user" && typeof msg.content === "string") userPrompt = msg.content;
-    }
-    // The page-generation request is the one whose user message asks for a
-    // wiki page for our shared concept (the extraction request asks to
-    // "Extract the key concepts" instead).
-    if (userPrompt.includes(`Write the wiki page for "${SHARED_CONCEPT}"`)) {
-      return systemPrompt;
-    }
-  }
-  return null;
+  return findSystemPromptByUserMessage(handle, (u) =>
+    u.includes(`Write the wiki page for "${SHARED_CONCEPT}"`),
+  );
 }
 
 /**

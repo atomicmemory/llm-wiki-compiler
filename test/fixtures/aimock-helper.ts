@@ -95,6 +95,37 @@ export function mockOpenAIEnv(
   };
 }
 
+/**
+ * Walk aimock's recorded requests and return the system-prompt content
+ * from the first request whose user-message content satisfies the
+ * predicate. Returns null when no matching request is found.
+ *
+ * Centralised because every aimock-backed CLI test that wants to assert
+ * "the LLM saw <X> in the system prompt" has to slice the same way:
+ * aimock normalises Anthropic's top-level `system` field into a
+ * `{role: "system", content: ...}` message in `body.messages`, so the
+ * walker has to inspect both system and user messages per request and
+ * disambiguate by user-message content.
+ */
+export function findSystemPromptByUserMessage(
+  handle: MockClaudeHandle,
+  predicate: (userMessage: string) => boolean,
+): string | null {
+  const requests = handle.mock.getRequests() as Array<{ body?: unknown }>;
+  for (const req of requests) {
+    const body = req.body as { messages?: unknown } | undefined;
+    if (!Array.isArray(body?.messages)) continue;
+    let systemPrompt = "";
+    let userPrompt = "";
+    for (const msg of body.messages as Array<{ role?: unknown; content?: unknown }>) {
+      if (msg.role === "system" && typeof msg.content === "string") systemPrompt = msg.content;
+      if (msg.role === "user" && typeof msg.content === "string") userPrompt = msg.content;
+    }
+    if (predicate(userPrompt)) return systemPrompt;
+  }
+  return null;
+}
+
 /** Live state managed by {@link useAimockLifecycle}. */
 export interface AimockLifecycle {
   /** Currently-running mock, or null between tests. Set by `start()`. */

@@ -14,6 +14,7 @@ import { describe, it, expect } from "vitest";
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 import {
+  findSystemPromptByUserMessage,
   mockClaudeEnv,
   useAimockLifecycle,
   type MockClaudeHandle,
@@ -66,25 +67,14 @@ function stubQueryResponses(handle: MockClaudeHandle): void {
   handle.mock.onMessage(/.*/, { content: ANSWER_TEXT });
 }
 
-/** Pull the system prompt for the answer-generation request out of aimock's recording. */
+/**
+ * Pull the system prompt for the answer-generation request out of aimock's
+ * recording. The answer-generation request includes "Relevant wiki pages:"
+ * in the user message; the page-selection request includes "Wiki Index:"
+ * instead, so the predicate disambiguates the two.
+ */
 function findAnswerSystemPrompt(handle: MockClaudeHandle): string | null {
-  const requests = handle.mock.getRequests() as Array<{ body?: unknown }>;
-  for (const req of requests) {
-    const body = req.body as { messages?: unknown } | undefined;
-    if (!Array.isArray(body?.messages)) continue;
-    let systemPrompt = "";
-    let userPrompt = "";
-    for (const msg of body.messages as Array<{ role?: unknown; content?: unknown }>) {
-      if (msg.role === "system" && typeof msg.content === "string") systemPrompt = msg.content;
-      if (msg.role === "user" && typeof msg.content === "string") userPrompt = msg.content;
-    }
-    // The answer-generation request includes "Relevant wiki pages:" in the user
-    // message; the page-selection request includes "Wiki Index:" instead.
-    if (userPrompt.includes("Relevant wiki pages:")) {
-      return systemPrompt;
-    }
-  }
-  return null;
+  return findSystemPromptByUserMessage(handle, (u) => u.includes("Relevant wiki pages:"));
 }
 
 describe("query --lang CLI integration (#37 query path)", () => {
