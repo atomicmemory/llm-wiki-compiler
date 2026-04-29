@@ -37,4 +37,30 @@ describe("slugify", () => {
   it("handles single word", () => {
     expect(slugify("Concept")).toBe("concept");
   });
+
+  // Issue #35: slugify must be Unicode-aware so non-ASCII titles don't
+  // silently collapse to the empty string.
+  it("preserves CJK characters", () => {
+    expect(slugify("测试文档")).toBe("测试文档");
+  });
+
+  it("preserves Japanese hiragana and katakana", () => {
+    expect(slugify("こんにちは カタカナ")).toBe("こんにちは-カタカナ");
+  });
+
+  it("preserves Cyrillic", () => {
+    expect(slugify("Привет Мир")).toBe("привет-мир");
+  });
+
+  it("mixes Latin and CJK in the same slug", () => {
+    expect(slugify("Hello 世界")).toBe("hello-世界");
+  });
+
+  it("strips emoji while keeping the surrounding letters", () => {
+    expect(slugify("Hello 🌍 World")).toBe("hello-world");
+  });
+
+  it("returns empty string when the title has no letters or numbers", () => {
+    expect(slugify("🎉🎊!!!")).toBe("");
+  });
 });

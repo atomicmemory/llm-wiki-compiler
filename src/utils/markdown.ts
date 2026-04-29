@@ -39,12 +39,24 @@ interface ProvenanceMetadata {
   inferredParagraphs?: number;
 }
 
-/** Convert a human-readable concept title to a filename slug. */
+/**
+ * Convert a human-readable concept title to a filename slug.
+ *
+ * Unicode-aware: keeps letters and numbers from any script (Latin, CJK,
+ * Cyrillic, Greek, Arabic, etc.). Strips punctuation, emoji, and other
+ * symbols. The previous implementation used `\w` without the `u` flag,
+ * which only matches `[A-Za-z0-9_]` — that silently dropped CJK titles
+ * to the empty string and caused the bug fixed in #35.
+ *
+ * Returns an empty string when the title contains no letters or numbers
+ * at all (callers that write files should detect this and fail loudly
+ * instead of writing a dotfile).
+ */
 export function slugify(title: string): string {
   return title
     .toLowerCase()
     .replace(/['']/g, "")
-    .replace(/[^\w\s-]/g, "")
+    .replace(/[^\p{L}\p{N}\s-]/gu, "")
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
