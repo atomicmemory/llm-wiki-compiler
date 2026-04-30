@@ -16,11 +16,16 @@
  *   - empty-turn export fails loudly (codex review hardening)
  */
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import path from "path";
-import { mkdir, mkdtemp, rm, readdir, readFile, writeFile, copyFile } from "fs/promises";
-import { tmpdir } from "os";
-import { runCLI, expectCLIExit, expectCLIFailure } from "./fixtures/run-cli.js";
+import { mkdir, readdir, readFile, writeFile, copyFile } from "fs/promises";
+import {
+  runCLI,
+  expectCLIExit,
+  expectCLIFailure,
+  type CLIResult,
+} from "./fixtures/run-cli.js";
+import { useIngestWorkspaces } from "./fixtures/ingest-workspace.js";
 
 const FIXTURES = path.resolve("test/fixtures/sessions");
 const CLAUDE_FIXTURE = path.join(FIXTURES, "claude-session.jsonl");
@@ -29,21 +34,35 @@ const CURSOR_FIXTURE = path.join(FIXTURES, "cursor-session.json");
 const MALFORMED_FIXTURE = path.join(FIXTURES, "malformed.jsonl");
 const EMPTY_TURNS_FIXTURE = path.join(FIXTURES, "claude-empty-session.jsonl");
 
-const tempDirs: string[] = [];
+// Reuse the shared workspace lifecycle from the existing ingest tests so
+// the tempDirs + afterEach boilerplate stays in one place.
+const workspaces = useIngestWorkspaces("session");
 
-afterEach(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop();
-    if (dir) await rm(dir, { recursive: true, force: true });
-  }
-});
+/** Make a temp workspace ready for `ingest-session`. */
+async function makeWorkspace(): Promise<string> {
+  return workspaces.makeEmptyWorkspace();
+}
 
-/** Make a temp workspace with an empty `sources/`. */
-async function makeWorkspace(prefix: string): Promise<string> {
-  const cwd = await mkdtemp(path.join(tmpdir(), `llmwiki-session-${prefix}-`));
-  tempDirs.push(cwd);
-  await mkdir(path.join(cwd, "sources"), { recursive: true });
-  return cwd;
+/** Read sources/ tolerating ENOENT when the CLI failed before creating it. */
+async function readSources(cwd: string): Promise<string[]> {
+  return readdir(path.join(cwd, "sources")).catch(() => [] as string[]);
+}
+
+/**
+ * Common assertion shape for tests that expect the CLI to fail with a
+ * specific stderr pattern AND verify no markdown was written into
+ * sources/. Hoisted so the empty-turns and empty-slug tests share it
+ * (fallow's CI mode flagged the pattern as a clone group otherwise).
+ */
+async function expectIngestSessionFailureWithoutWrite(
+  result: CLIResult,
+  stderrPattern: RegExp,
+  cwd: string,
+): Promise<void> {
+  expectCLIFailure(result);
+  expect(result.stderr.toLowerCase()).toMatch(stderrPattern);
+  const files = await readSources(cwd);
+  expect(files).not.toContain(".md");
 }
 
 /**
@@ -61,7 +80,7 @@ async function assertSingleSessionIngested(cwd: string, adapterName: string): Pr
 
 describe("ingest-session CLI integration", () => {
   it("ingest-session --help shows the command description", async () => {
-    const cwd = await makeWorkspace("help");
+    const cwd = await makeWorkspace();
     const result = await runCLI(["ingest-session", "--help"], cwd);
     expectCLIExit(result, 0);
     expect(result.stdout).toContain("ingest-session");
@@ -69,7 +88,7 @@ describe("ingest-session CLI integration", () => {
   });
 
   it("ingest-session with claude fixture writes markdown to sources/", async () => {
-    const cwd = await makeWorkspace("claude");
+    const cwd = await makeWorkspace();
     const result = await runCLI(["ingest-session", CLAUDE_FIXTURE], cwd);
     expectCLIExit(result, 0);
     expect(result.stdout).toContain("claude");
@@ -77,7 +96,7 @@ describe("ingest-session CLI integration", () => {
   });
 
   it("ingest-session with codex fixture writes markdown to sources/", async () => {
-    const cwd = await makeWorkspace("codex");
+    const cwd = await makeWorkspace();
     const result = await runCLI(["ingest-session", CODEX_FIXTURE], cwd);
     expectCLIExit(result, 0);
     expect(result.stdout).toContain("codex");
@@ -85,7 +104,7 @@ describe("ingest-session CLI integration", () => {
   });
 
   it("ingest-session with cursor fixture writes markdown to sources/", async () => {
-    const cwd = await makeWorkspace("cursor");
+    const cwd = await makeWorkspace();
     const result = await runCLI(["ingest-session", CURSOR_FIXTURE], cwd);
     expectCLIExit(result, 0);
     expect(result.stdout).toContain("cursor");
@@ -93,14 +112,14 @@ describe("ingest-session CLI integration", () => {
   });
 
   it("ingest-session with malformed JSONL exits non-zero with actionable error", async () => {
-    const cwd = await makeWorkspace("malformed");
+    const cwd = await makeWorkspace();
     const result = await runCLI(["ingest-session", MALFORMED_FIXTURE], cwd);
     expectCLIFailure(result);
     expect(result.stderr.toLowerCase()).toMatch(/malformed|line \d+|invalid/);
   });
 
   it("ingest-session with unknown format exits non-zero with no-adapter message", async () => {
-    const cwd = await makeWorkspace("unknown");
+    const cwd = await makeWorkspace();
     const unknownFile = path.join(cwd, "unknown.txt");
     await writeFile(unknownFile, "hello world", "utf-8");
     const result = await runCLI(["ingest-session", unknownFile], cwd);
@@ -109,7 +128,7 @@ describe("ingest-session CLI integration", () => {
   });
 
   it("ingest-session with missing path exits non-zero with file-not-found error", async () => {
-    const cwd = await makeWorkspace("missing");
+    const cwd = await makeWorkspace();
     const missingPath = path.join(cwd, "does-not-exist.jsonl");
     const result = await runCLI(["ingest-session", missingPath], cwd);
     expectCLIFailure(result);
@@ -119,19 +138,19 @@ describe("ingest-session CLI integration", () => {
 
 describe("ingest-session — adapter validation hardening", () => {
   it("session with no user/assistant turns fails loudly even when shape detection passes", async () => {
-    const cwd = await makeWorkspace("empty-turns");
+    const cwd = await makeWorkspace();
     const result = await runCLI(["ingest-session", EMPTY_TURNS_FIXTURE], cwd);
-    expectCLIFailure(result);
-    expect(result.stderr.toLowerCase()).toMatch(/no usable turns|no user or assistant/);
-    // No file written — empty exports should not produce a content-free source.
-    const files = await readdir(path.join(cwd, "sources"));
-    expect(files).toEqual([]);
+    await expectIngestSessionFailureWithoutWrite(
+      result,
+      /no usable turns|no user or assistant/,
+      cwd,
+    );
   });
 });
 
 describe("ingest-session — bulk directory import", () => {
   it("mixed good and bad files: good ones import, bad ones warn, exit 0", async () => {
-    const cwd = await makeWorkspace("bulk-mixed");
+    const cwd = await makeWorkspace();
     const dir = path.join(cwd, "sessions");
     await mkdir(dir, { recursive: true });
     await copyFile(CLAUDE_FIXTURE, path.join(dir, "claude.jsonl"));
@@ -148,7 +167,7 @@ describe("ingest-session — bulk directory import", () => {
   });
 
   it("directory with only malformed/unrecognised files exits non-zero", async () => {
-    const cwd = await makeWorkspace("bulk-all-bad");
+    const cwd = await makeWorkspace();
     const dir = path.join(cwd, "sessions");
     await mkdir(dir, { recursive: true });
     await copyFile(MALFORMED_FIXTURE, path.join(dir, "malformed.jsonl"));
@@ -162,7 +181,7 @@ describe("ingest-session — bulk directory import", () => {
 
 describe("ingest-session — filename safety (#35/#36 inheritance)", () => {
   it("two sessions with the same title from different files do not silently overwrite", async () => {
-    const cwd = await makeWorkspace("dup-titles");
+    const cwd = await makeWorkspace();
     // Build two distinct claude sessions whose first user turn produces the
     // same title — same slug, different sources. The second ingest must
     // disambiguate via the hash suffix shared with normal ingest (#36).
@@ -194,7 +213,7 @@ describe("ingest-session — filename safety (#35/#36 inheritance)", () => {
   });
 
   it("session whose title slugifies to empty fails loudly without writing a dotfile", async () => {
-    const cwd = await makeWorkspace("empty-slug");
+    const cwd = await makeWorkspace();
     const file = path.join(cwd, "emoji-only.jsonl");
     // Title derives from the first user turn content. Use pure-emoji content
     // so slugify returns "" and the empty-slug guard from #35 fires.
@@ -206,9 +225,10 @@ describe("ingest-session — filename safety (#35/#36 inheritance)", () => {
     );
 
     const result = await runCLI(["ingest-session", file], cwd);
-    expectCLIFailure(result);
-    expect(result.stderr.toLowerCase()).toMatch(/could not derive a filename/);
-    const files = await readdir(path.join(cwd, "sources"));
-    expect(files).not.toContain(".md");
+    await expectIngestSessionFailureWithoutWrite(
+      result,
+      /could not derive a filename/,
+      cwd,
+    );
   });
 });
