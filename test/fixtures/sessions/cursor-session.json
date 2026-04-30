@@ -1,0 +1,29 @@
+{
+  "tabs": [
+    {
+      "title": "Refactor the authentication module",
+      "messages": [
+        {
+          "role": "user",
+          "content": "I need to refactor the authentication module to use JWTs.",
+          "timestamp": "2024-02-10T09:00:00.000Z"
+        },
+        {
+          "role": "assistant",
+          "content": "I can help you migrate to JWT-based authentication. First, install the `jsonwebtoken` package and update your auth middleware.",
+          "timestamp": "2024-02-10T09:00:10.000Z"
+        },
+        {
+          "role": "user",
+          "content": "Should I use RS256 or HS256?",
+          "timestamp": "2024-02-10T09:01:00.000Z"
+        },
+        {
+          "role": "assistant",
+          "content": "RS256 (asymmetric) is preferable for multi-service architectures; HS256 (symmetric) is simpler for single-service apps.",
+          "timestamp": "2024-02-10T09:01:15.000Z"
+        }
+      ]
+    }
+  ]
+}

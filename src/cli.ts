@@ -10,6 +10,7 @@ import "dotenv/config";
 import { createRequire } from "module";
 import { Command } from "commander";
 import ingestCommand from "./commands/ingest.js";
+import ingestSessionCommand from "./commands/ingest-session.js";
 import compileCommand from "./commands/compile.js";
 import queryCommand from "./commands/query.js";
 import watchCommand from "./commands/watch.js";
@@ -40,6 +41,18 @@ program
   .action(async (source: string) => {
     try {
       await ingestCommand(source);
+    } catch (err) {
+      console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command("ingest-session <path>")
+  .description("Ingest a coding-agent session export (Claude, Codex, Cursor) into sources/")
+  .action(async (targetPath: string) => {
+    try {
+      await ingestSessionCommand(targetPath);
     } catch (err) {
       console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
       process.exit(1);
