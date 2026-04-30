@@ -178,13 +178,17 @@ describe("formatSessionAsMarkdown", () => {
     expect(md).toContain("2024-01-15T10:00:00.000Z");
   });
 
-  it("renders empty session with fallback message", () => {
+  // Empty sessions are now rejected by parseSessionFile's usable-turns guard
+  // (see registry.ts) before they ever reach the formatter, so the previous
+  // "fallback message" branch was unreachable. The formatter now renders an
+  // empty turns array as the empty string.
+  it("renders empty turns array as empty string (unreachable in production)", () => {
     const md = formatSessionAsMarkdown({
       title: "Empty",
       adapter: "test",
       turns: [],
     });
-    expect(md).toContain("No conversation turns");
+    expect(md).toBe("");
   });
 });
 

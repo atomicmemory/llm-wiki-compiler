@@ -9,9 +9,9 @@
  */
 
 import path from "path";
-import { mkdir, writeFile, readdir, stat } from "fs/promises";
-import { slugify, buildFrontmatter } from "../utils/markdown.js";
-import { SOURCES_DIR } from "../utils/constants.js";
+import { readdir, stat } from "fs/promises";
+import { buildFrontmatter } from "../utils/markdown.js";
+import { saveSource } from "../utils/source-writer.js";
 import * as output from "../utils/output.js";
 import { parseSessionFile, formatSessionAsMarkdown } from "../adapters/registry.js";
 import type { NormalizedSession } from "../adapters/types.js";
@@ -39,19 +39,18 @@ function buildSessionFrontmatter(session: NormalizedSession, sourcePath: string)
   return buildFrontmatter(meta);
 }
 
-/** Write a session as a markdown file in sources/. Returns the saved path. */
+/**
+ * Write a session as a markdown file under `sources/` using the shared
+ * source writer — gets the empty-slug guard (#35) and the
+ * basename-collision suffix (#36) for free, so two sessions with the
+ * same title from different transcript files coexist instead of one
+ * silently overwriting the other.
+ */
 async function saveSessionSource(session: NormalizedSession, sourcePath: string): Promise<string> {
   const frontmatter = buildSessionFrontmatter(session, sourcePath);
   const body = formatSessionAsMarkdown(session);
   const document = `${frontmatter}\n\n${body}\n`;
-
-  const filename = `${slugify(session.title)}.md`;
-  const destPath = path.join(SOURCES_DIR, filename);
-
-  await mkdir(SOURCES_DIR, { recursive: true });
-  await writeFile(destPath, document, "utf-8");
-
-  return destPath;
+  return saveSource(session.title, document, sourcePath);
 }
 
 /**
@@ -94,8 +93,14 @@ async function listDirectoryFiles(dirPath: string): Promise<string[]> {
 }
 
 /**
- * Ingest all session files in a directory.
- * Skips files that no adapter recognises, rather than failing the whole batch.
+ * Ingest all session files in a directory. Recognised files import; the
+ * rest are skipped with a warning so a single bad file doesn't abort
+ * the whole batch.
+ *
+ * Throws when ZERO files imported successfully, even if the directory
+ * contained candidate files. A bulk run with nothing usable is a
+ * failure mode the user needs to know about — exiting 0 with "Imported
+ * 0 session(s), skipped N" was easy to miss in scripts.
  */
 async function ingestDirectory(dirPath: string): Promise<void> {
   const files = await listDirectoryFiles(dirPath);
@@ -118,6 +123,13 @@ async function ingestDirectory(dirPath: string): Promise<void> {
       output.status("!", output.warn(`Skipped ${path.basename(file)}: ${message}`));
       skipped++;
     }
+  }
+
+  if (imported === 0) {
+    throw new Error(
+      `No sessions imported from ${dirPath} (${skipped} file(s) skipped). ` +
+        `Check that at least one file is in a supported session format.`,
+    );
   }
 
   output.status(
