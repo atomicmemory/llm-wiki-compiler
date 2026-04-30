@@ -50,7 +50,19 @@ npx tsc --noEmit   # Type-check
 npm run build       # Build
 npm test            # Tests
 npx fallow          # Codebase health (dead code, duplication, complexity)
+npm run fallow:ci   # Run fallow scoped to changes since origin/main (matches CI args)
 ```
+
+**A note on `npm run fallow:ci`:** the `codebase-health` job in CI passes `--changed-since <PR-base-sha>` so it scopes analysis to the diff. `npm run fallow:ci` mirrors that locally by computing the merge-base between `HEAD` and the canonical main branch. The script prefers `upstream/main` when an `upstream` remote is configured (the fork workflow), and falls back to `origin/main` for direct clones. To make sure the comparison uses the canonical main from atomicmemory/llm-wiki-compiler:
+
+```bash
+# One-time setup on your fork
+git remote add upstream https://github.com/atomicmemory/llm-wiki-compiler.git
+```
+
+Without an `upstream` remote on a fork checkout, the script compares against your fork's `origin/main`, which can drift from the canonical main and miss findings CI will catch.
+
+There is also one known parity gap that no flag closes: fallow's clone-detection occasionally returns different results across platforms (CI Linux x64 vs macOS arm64). When CI flags a clone you can't reproduce locally, dedupe by intent and re-push — it's not a bug in your branch.
 
 ### Code Style
 

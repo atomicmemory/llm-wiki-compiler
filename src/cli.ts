@@ -15,6 +15,8 @@ import compileCommand from "./commands/compile.js";
 import queryCommand from "./commands/query.js";
 import watchCommand from "./commands/watch.js";
 import lintCommand from "./commands/lint.js";
+import exportCommand from "./commands/export.js";
+import { schemaInitCommand, schemaShowCommand } from "./commands/schema.js";
 import reviewListCommand from "./commands/review-list.js";
 import reviewShowCommand from "./commands/review-show.js";
 import reviewApproveCommand from "./commands/review-approve.js";
@@ -64,8 +66,13 @@ program
     "--review",
     "Write generated pages as review candidates under .llmwiki/candidates/ instead of mutating wiki/. Orphan-marking for deleted sources is deferred until the next non-review compile.",
   )
-  .action(async (options: { review?: boolean }) => {
+  .option(
+    "--lang <code>",
+    "Target language for generated wiki content (e.g. \"Chinese\", \"ja\", \"zh-CN\"). Equivalent to setting LLMWIKI_OUTPUT_LANG.",
+  )
+  .action(async (options: { review?: boolean; lang?: string }) => {
     try {
+      applyLanguageOption(options.lang);
       requireProvider();
       await compileCommand({ review: options.review });
     } catch (err) {
@@ -130,15 +137,26 @@ program
   .command("query <question>")
   .description("Ask a question against the wiki")
   .option("--save", "Save the answer as a wiki page")
-  .action(async (question: string, options: { save?: boolean }) => {
-    try {
-      requireProvider();
-      await queryCommand(process.cwd(), question, options);
-    } catch (err) {
-      console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
-      process.exit(1);
-    }
-  });
+  .option("--debug", "Print which pages and chunks were selected and their scores")
+  .option(
+    "--lang <code>",
+    "Target language for the answer (e.g. \"Chinese\", \"ja\", \"zh-CN\"). Equivalent to setting LLMWIKI_OUTPUT_LANG.",
+  )
+  .action(
+    async (
+      question: string,
+      options: { save?: boolean; debug?: boolean; lang?: string },
+    ) => {
+      try {
+        applyLanguageOption(options.lang);
+        requireProvider();
+        await queryCommand(process.cwd(), question, options);
+      } catch (err) {
+        console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
+        process.exit(1);
+      }
+    },
+  );
 
 program
   .command("watch")
@@ -165,6 +183,51 @@ program
     }
   });
 
+const schemaCmd = program
+  .command("schema")
+  .description("Inspect or initialize the project's wiki schema config");
+
+schemaCmd
+  .command("init")
+  .description("Write a starter schema file to .llmwiki/schema.json")
+  .action(async () => {
+    try {
+      await schemaInitCommand();
+    } catch (err) {
+      console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
+      process.exit(1);
+    }
+  });
+
+schemaCmd
+  .command("show")
+  .description("Print the resolved schema for this project")
+  .action(async () => {
+    try {
+      await schemaShowCommand();
+    } catch (err) {
+      console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command("export")
+  .description("Export wiki content to portable formats (llms.txt, JSON, GraphML, Marp, …)")
+  .option("--target <name>", "Limit export to a single target format")
+  .option(
+    "--source <kind>",
+    "For marp target: which pages to include — concepts, queries, or all (default: all)",
+  )
+  .action(async (options: { target?: string; source?: string }) => {
+    try {
+      await exportCommand(process.cwd(), options);
+    } catch (err) {
+      console.error(`\x1b[31mError:\x1b[0m ${err instanceof Error ? err.message : err}`);
+      process.exit(1);
+    }
+  });
+
 program
   .command("serve")
   .description("Start an MCP server exposing wiki tools and resources over stdio")
@@ -179,6 +242,17 @@ program
       process.exit(1);
     }
   });
+
+/**
+ * Apply the --lang CLI option by setting LLMWIKI_OUTPUT_LANG so prompt
+ * builders pick it up (issue #37). Single env slot keeps the resolution
+ * order simple: explicit flag wins over the inherited environment.
+ */
+function applyLanguageOption(lang: string | undefined): void {
+  if (lang && lang.trim().length > 0) {
+    process.env.LLMWIKI_OUTPUT_LANG = lang.trim();
+  }
+}
 
 /** API key env var required per provider. Null means no key needed. */
 const PROVIDER_KEY_VARS: Record<string, string | null> = {

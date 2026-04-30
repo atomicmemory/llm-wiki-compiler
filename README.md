@@ -103,6 +103,15 @@ export OLLAMA_HOST=http://ollama_host:11434/v1
 export OLLAMA_EMBEDDINGS_HOST=http://ollama_host:11435/v1
 ```
 
+### Request timeouts
+
+The OpenAI SDK defaults to a 10-minute per-request timeout, which can cut off long compile-time completions on slower local models. Override per provider:
+
+- `LLMWIKI_REQUEST_TIMEOUT_MS` — provider-agnostic timeout in milliseconds. Applies to both the `openai` and `ollama` backends.
+- `OLLAMA_TIMEOUT_MS` — Ollama-specific override. Wins over `LLMWIKI_REQUEST_TIMEOUT_MS` when both are set.
+
+Defaults: 10 minutes for `openai`, 30 minutes for `ollama` (local models commonly need more).
+
 ## Why not just RAG?
 
 RAG retrieves chunks at query time. Every question re-discovers the same relationships from scratch. Nothing accumulates.
@@ -136,6 +145,7 @@ A raw source like a Wikipedia article on knowledge compilation becomes a structu
 ---
 title: Knowledge Compilation
 summary: Techniques for converting knowledge representations into forms that support efficient reasoning.
+kind: concept
 sources:
   - knowledge-compilation.md
 createdAt: "2026-04-05T12:00:00Z"
@@ -150,7 +160,7 @@ a knowledge base into a target language that supports efficient queries.
 Related concepts: [[Propositional Logic]], [[Model Counting]]
 ```
 
-Pages include source attribution in frontmatter. Paragraphs are annotated with `^[filename.md]` markers pointing back to the source file that contributed the content.
+Pages include source attribution in frontmatter. Paragraphs are annotated with `^[filename.md]` markers pointing back to the source file that contributed the content; specific claims can use line ranges like `^[filename.md:42-58]` or `^[filename.md#L42-L58]`.
 
 ## Commands
 
@@ -163,6 +173,8 @@ Pages include source attribution in frontmatter. Paragraphs are annotated with `
 | `llmwiki review show <id>` | Print a candidate's title, summary, and body |
 | `llmwiki review approve <id>` | Promote a candidate into `wiki/` and refresh index/MOC/embeddings |
 | `llmwiki review reject <id>` | Archive a candidate without touching `wiki/` |
+| `llmwiki schema init` | Write a starter `.llmwiki/schema.json` file |
+| `llmwiki schema show` | Print the resolved schema for the current project |
 | `llmwiki query "question"` | Ask questions against your compiled wiki |
 | `llmwiki query "question" --save` | Answer and save the result as a wiki page |
 | `llmwiki lint` | Check wiki quality (broken links, orphans, empty pages, low confidence, contradictions, etc.) |
@@ -177,6 +189,7 @@ wiki/
   queries/          saved query answers, included in index and retrieval
   index.md          auto-generated table of contents
 .llmwiki/
+  schema.json       optional page-kind and cross-link policy
   candidates/       pending review candidates from `compile --review`
   candidates/archive/  rejected candidates kept for audit
 ```
@@ -227,6 +240,41 @@ When multiple sources merge into one slug, metadata is reconciled: `min` confide
 - `low-confidence` — flags pages with `confidence` below a threshold
 - `contradicted-page` — flags pages with non-empty `contradictedBy`
 - `excess-inferred-paragraphs` — flags pages with too many inferred paragraphs without citations
+
+## Claim-level provenance
+
+Paragraph citations continue to use the original source-marker form:
+
+```markdown
+This paragraph is grounded in the source. ^[source.md]
+```
+
+For claims that need tighter verification, pages can pin a statement to a line range in the ingested source:
+
+```markdown
+The system uses a two-phase compile pipeline. ^[architecture-notes.md:42-58]
+The same range can also use GitHub-style anchors. ^[architecture-notes.md#L42-L58]
+```
+
+`llmwiki lint` validates both forms. It reports missing source files, malformed claim citations, impossible ranges like line `0` or `8-3`, and ranges that extend past the end of the source file.
+
+## Schema layer
+
+Projects can optionally define `.llmwiki/schema.json` to shape the wiki beyond flat concept pages. Existing projects do not need a schema file; missing or invalid `kind` values fall back to `concept`.
+
+```bash
+llmwiki schema init
+llmwiki schema show
+```
+
+The schema supports four page kinds:
+
+- `concept` — standalone idea or pattern
+- `entity` — specific person, product, organization, or named artifact
+- `comparison` — side-by-side analysis across concepts or entities
+- `overview` — map page that connects several concepts in a domain
+
+Schema rules can set per-kind `minWikilinks` and optional `seedPages`. Compile can materialize seed pages such as overviews, lint enforces page-kind-specific cross-link minimums, and review candidates surface schema violations before approval.
 
 ## Demo
 
@@ -316,11 +364,26 @@ Karpathy describes an abstract pattern for turning raw data into compiled knowle
 | Auto-recompile | `llmwiki watch` | Implemented |
 | Linting / health-check pass | `llmwiki lint` | Implemented |
 | Agent integration | `llmwiki serve` (MCP server) | Implemented |
-| Image support | — | Not yet implemented |
-| Marp slides | — | Not yet implemented |
+| Image support | `llmwiki ingest <image>` | Implemented |
+| Marp slides | `llmwiki export --target marp` | Implemented |
 | Fine-tuning | — | Not yet implemented |
 
 ## Roadmap
+
+Shipped in 0.6.0:
+
+- ✅ Export bundle (`llms.txt`, JSON, JSON-LD, GraphML, Marp slides)
+
+Shipped in 0.5.0:
+
+- ✅ Multimodal ingest (images, PDFs, transcripts)
+- ✅ Chunked retrieval with reranking and `--debug` output
+- ⚠️ Minimum Node version raised to 24 (was 18)
+
+Shipped in 0.4.0:
+
+- ✅ Claim-level provenance with source ranges
+- ✅ First-class schema layer with typed page kinds (`concept`, `entity`, `comparison`, `overview`)
 
 Shipped in 0.3.0:
 
@@ -338,18 +401,23 @@ Shipped in 0.2.0:
 
 Next up:
 
-- Claim-level provenance with source ranges
-- First-class schema layer with typed page kinds (`concept`, `entity`, `comparison`, `overview`)
-- Multimodal ingest (images, PDFs, transcripts)
-- Chunked retrieval with reranking
-- Export bundle (`llms.txt`, JSON, JSON-LD, GraphML, Marp)
 - Session-history adapters (Claude, Codex, Cursor exports)
 
-If you like ambitious problems: **schema layer + typed page kinds**, **claim-level provenance**, and **chunked retrieval with reranking** are the meatiest. Open an issue to claim one or kick off a design discussion.
+Future ideas (open to discussion):
+
+- Recurring source refresh jobs — re-ingest URLs on a schedule, diff against the prior snapshot, re-compile only what changed
+- Graph export and a lightweight read-only graph browser for the concept network
+- A local read-only web UI for browsing the compiled wiki without Obsidian
+- MCP prompt resources — curated agent prompts (review the wiki, propose new sources, draft a comparison page) shipped as MCP resources
+- Maintenance log + log rotation so long-running watch sessions don't grow unbounded
+
+If you like ambitious problems: **graph export with a browser**, **recurring source refresh**, and **MCP prompt resources** are the meatiest of the futures. Open an issue to claim one or kick off a design discussion.
+
+Explicitly not planned (good ideas, just not for this repo): full static-site generator, desktop or mobile apps, fine-tuning, a formal ontology engine, heavy graph reasoning.
 
 ## Requirements
 
-Node.js >= 18, plus provider credentials (for Anthropic: `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`).
+Node.js >= 24, plus provider credentials (for Anthropic: `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`).
 
 ## License
 

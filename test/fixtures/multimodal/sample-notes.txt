@@ -1,0 +1,1 @@
+The deployment pipeline runs through three stages before reaching production. First, all unit and integration tests must pass in the CI environment. Next, a staging deployment is created and smoke tests are executed against it. Finally, after manual approval, the build is promoted to production with zero-downtime rolling updates.

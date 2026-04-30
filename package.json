@@ -1,16 +1,17 @@
 {
   "name": "llm-wiki-compiler",
-  "version": "0.3.0",
+  "version": "0.5.1",
   "description": "A knowledge compiler CLI — raw sources in, interlinked wiki out",
   "type": "module",
   "bin": {
-    "llmwiki": "./dist/cli.js"
+    "llmwiki": "dist/cli.js"
   },
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
+    "fallow:ci": "bash scripts/fallow-ci.sh",
     "prepublishOnly": "npm run build && npm test",
     "prepare": "husky"
   },
@@ -38,7 +39,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=24"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -51,10 +52,13 @@
     "jsdom": "^25.0.0",
     "openai": "^4.0.0",
     "p-limit": "^6.0.0",
+    "pdf-parse": "^2.4.5",
     "turndown": "^7.2.0",
+    "youtube-transcript": "^1.3.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@copilotkit/aimock": "^1.15.1",
     "@types/js-yaml": "^4.0.9",
     "@types/jsdom": "^21.1.0",
     "@types/turndown": "^5.0.0",

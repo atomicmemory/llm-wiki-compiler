@@ -1,0 +1,5 @@
+Alice: Hey, did you get a chance to review the pull request?
+Bob: Yes, I left some comments. The logic in the main loop looks off.
+Alice: I saw that. I think the off-by-one error is on line 42.
+Bob: Exactly. Fix that and add a test case and it should be good to merge.
+Alice: Will do. I'll push the fix in the next hour.

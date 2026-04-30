@@ -17,6 +17,8 @@ import {
 } from "./source-state.js";
 import {
   atomicWrite,
+  buildFrontmatter,
+  parseFrontmatter,
   safeReadFile,
   validateWikiPage,
   slugify,
@@ -26,8 +28,10 @@ import { acquireLock, releaseLock } from "../utils/lock.js";
 import {
   CONCEPT_EXTRACTION_TOOL,
   buildExtractionPrompt,
+  buildSeedPagePrompt,
   parseConcepts,
 } from "./prompts.js";
+import { loadSchema, type SchemaConfig, type SeedPage } from "../schema/index.js";
 import { detectChanges, hashFile } from "./hasher.js";
 import {
   findAffectedSources,
@@ -40,9 +44,11 @@ import {
 import { markOrphaned, orphanUnownedFrozenPages } from "./orphan.js";
 import { resolveLinks } from "./resolver.js";
 import { generateIndex } from "./indexgen.js";
-import { generateMOC } from "./obsidian.js";
+import { buildBudgetedCombinedContent, type SourceSlice } from "./prompt-budget.js";
+import { addObsidianMeta, generateMOC } from "./obsidian.js";
 import { updateEmbeddings } from "../utils/embeddings.js";
 import { writeCandidate } from "./candidates.js";
+import { checkPageCrossLinks } from "../linter/rules.js";
 import { renderMergedPageContent } from "./page-renderer.js";
 import * as output from "../utils/output.js";
 import {
@@ -59,6 +65,7 @@ import type {
   ReviewCandidate,
   SourceChange,
   SourceState,
+  WikiFrontmatter,
   WikiState,
 } from "../utils/types.js";
 
@@ -141,6 +148,7 @@ async function generatePagesPhase(
   root: string,
   extractions: ExtractionResult[],
   frozenSlugs: Set<string>,
+  schema: SchemaConfig,
   options: CompileOptions,
 ): Promise<PageGenerationResult> {
   const merged = mergeExtractions(extractions, frozenSlugs);
@@ -154,7 +162,7 @@ async function generatePagesPhase(
   const candidates: string[] = [];
   const pages = await Promise.all(
     merged.map((entry) => limit(async () => {
-      const result = await generateMergedPage(root, entry, options, sourceStates);
+      const result = await generateMergedPage(root, entry, schema, options, sourceStates);
       if (result.error) errors.push(result.error);
       if (result.candidateId) candidates.push(result.candidateId);
       return entry;
@@ -219,6 +227,8 @@ async function runCompilePipeline(
   root: string,
   options: CompileOptions,
 ): Promise<CompileResult> {
+  const schema = await loadSchema(root);
+  reportSchemaStatus(schema);
   const state = await readState(root);
   const changes = await detectChanges(root, state);
   augmentWithAffectedSources(changes, findAffectedSources(state, changes));
@@ -226,6 +236,21 @@ async function runCompilePipeline(
   const buckets = bucketChanges(changes);
   if (buckets.toCompile.length === 0 && buckets.deleted.length === 0) {
     output.status("✓", output.success("Nothing to compile — all sources up to date."));
+    // Seed pages are cheap deterministic writes — always run them even when
+    // no source files changed, so adding a seed page to schema.json takes
+    // effect on the next compile without needing a source file edit.
+    if (!options.review) {
+      const emptyGeneration: PageGenerationResult = { pages: [], errors: [], candidates: [] };
+      await generateSeedPages(root, schema, emptyGeneration);
+      // Rebuild index/MOC so the newly-written seed pages become discoverable,
+      // and propagate any seed-page validation errors into the returned result.
+      await finalizeWiki(root, emptyGeneration.pages);
+      return {
+        ...emptyCompileResult(),
+        skipped: buckets.unchanged.length,
+        errors: emptyGeneration.errors,
+      };
+    }
     return { ...emptyCompileResult(), skipped: buckets.unchanged.length };
   }
 
@@ -249,7 +274,7 @@ async function runCompilePipeline(
     await freezeFailedExtractions(root, extractions, frozenSlugs);
   }
 
-  const generation = await generatePagesPhase(root, extractions, frozenSlugs, options);
+  const generation = await generatePagesPhase(root, extractions, frozenSlugs, schema, options);
 
   if (!options.review) {
     await persistExtractionStates(root, extractions);
@@ -257,9 +282,19 @@ async function runCompilePipeline(
       await orphanUnownedFrozenPages(root, frozenSlugs);
     }
     await persistFrozenSlugs(root, frozenSlugs, extractions);
+    // Seed pages write directly into wiki/, so skip them in review mode
+    // to honour the "no wiki/ mutation" contract of that mode.
+    await generateSeedPages(root, schema, generation);
     await finalizeWiki(root, generation.pages);
   }
   return summarizeCompile(buckets, generation, extractions, options);
+}
+
+/** Log where the schema was loaded from so the user can confirm it was picked up. */
+function reportSchemaStatus(schema: SchemaConfig): void {
+  if (schema.loadedFrom) {
+    output.status("i", output.dim(`Schema: ${schema.loadedFrom}`));
+  }
 }
 
 /** Append affected-source changes (logging each addition) to the change list. */
@@ -428,12 +463,19 @@ export function reconcileConceptMetadata(
  * contributing material rather than just the last source processed.
  * Metadata is reconciled across all contributing concepts via
  * reconcileConceptMetadata so contradictions from later sources are not lost.
+ *
+ * Combined content is then run through {@link buildBudgetedCombinedContent}
+ * so popular concepts that appear in many overlapping sources do not blow
+ * past the LLM provider's context window (issue #39). When the raw total
+ * fits the budget, the output is byte-identical to the previous unbudgeted
+ * concatenation.
  */
 function mergeExtractions(
   extractions: ExtractionResult[],
   frozenSlugs: Set<string>,
 ): MergedConcept[] {
   const bySlug = new Map<string, MergedConcept>();
+  const slicesBySlug = new Map<string, SourceSlice[]>();
 
   for (const result of extractions) {
     if (result.concepts.length === 0) continue;
@@ -446,16 +488,28 @@ function mergeExtractions(
       if (existing) {
         existing.concept = reconcileConceptMetadata(existing.concept, concept);
         existing.sourceFiles.push(result.sourceFile);
-        existing.combinedContent += `\n\n--- SOURCE: ${result.sourceFile} ---\n\n${result.sourceContent}`;
       } else {
         bySlug.set(slug, {
           slug,
           concept,
           sourceFiles: [result.sourceFile],
-          combinedContent: `--- SOURCE: ${result.sourceFile} ---\n\n${result.sourceContent}`,
+          combinedContent: "",
         });
+        slicesBySlug.set(slug, []);
       }
+      slicesBySlug.get(slug)!.push({
+        file: result.sourceFile,
+        content: result.sourceContent,
+      });
     }
+  }
+
+  for (const merged of bySlug.values()) {
+    const slices = slicesBySlug.get(merged.slug) ?? [];
+    merged.combinedContent = buildBudgetedCombinedContent(
+      merged.concept.concept,
+      slices,
+    );
   }
 
   return Array.from(bySlug.values());
@@ -477,13 +531,14 @@ interface MergedPageOutcome {
 async function generateMergedPage(
   root: string,
   entry: MergedConcept,
+  schema: SchemaConfig,
   options: CompileOptions,
   sourceStates: SourceStateMap,
 ): Promise<MergedPageOutcome> {
-  const fullPage = await renderMergedPageContent(root, entry);
+  const fullPage = await renderMergedPageContent(root, entry, schema);
 
   if (options.review) {
-    return await persistReviewCandidate(root, entry, fullPage, sourceStates);
+    return await persistReviewCandidate(root, entry, fullPage, sourceStates, schema);
   }
 
   const pagePath = path.join(root, CONCEPTS_DIR, `${entry.slug}.md`);
@@ -497,7 +552,14 @@ async function persistReviewCandidate(
   entry: MergedConcept,
   fullPage: string,
   sourceStates: SourceStateMap,
+  schema: SchemaConfig,
 ): Promise<MergedPageOutcome> {
+  // Run schema-aware lint against the candidate body so violations are visible
+  // in `review show` before a reviewer approves the page. The virtual file path
+  // uses the slug so diagnostics are identifiable without a real disk path.
+  const virtualPath = `wiki/concepts/${entry.slug}.md`;
+  const violations = checkPageCrossLinks(fullPage, virtualPath, schema);
+
   const candidate: ReviewCandidate = await writeCandidate(root, {
     title: entry.concept.concept,
     slug: entry.slug,
@@ -505,9 +567,78 @@ async function persistReviewCandidate(
     sources: entry.sourceFiles,
     body: fullPage,
     sourceStates: pickStatesForSources(sourceStates, entry.sourceFiles),
+    schemaViolations: violations.length > 0 ? violations : undefined,
   });
   output.status("?", output.info(`Candidate ready: ${candidate.id} (${entry.slug})`));
   return { candidateId: candidate.id };
+}
+
+/**
+ * Materialise schema-declared seed pages (overview, comparison, entity).
+ * Each seed page is written under wiki/concepts/ next to concept pages so
+ * existing tooling (index, MOC, lint, embeddings) treats them uniformly.
+ * Slugs from generated pages this run are added so seed pages can be linked
+ * deterministically without waiting for a second compile pass.
+ * @param root - Project root directory.
+ * @param schema - Resolved schema config.
+ * @param generation - Result of the concept-page generation phase.
+ */
+async function generateSeedPages(
+  root: string,
+  schema: SchemaConfig,
+  generation: PageGenerationResult,
+): Promise<void> {
+  if (schema.seedPages.length === 0) return;
+  for (const seed of schema.seedPages) {
+    const error = await generateSingleSeedPage(root, schema, seed);
+    if (error) generation.errors.push(error);
+  }
+}
+
+/** Build, prompt, and persist a single seed page. */
+async function generateSingleSeedPage(
+  root: string,
+  schema: SchemaConfig,
+  seed: SeedPage,
+): Promise<string | null> {
+  const slug = slugify(seed.title);
+  const pagePath = path.join(root, CONCEPTS_DIR, `${slug}.md`);
+  const relatedContent = await loadSeedRelatedPages(root, seed.relatedSlugs ?? []);
+  const rule = schema.kinds[seed.kind];
+  const system = buildSeedPagePrompt(seed, rule, relatedContent);
+  const pageBody = await callClaude({
+    system,
+    messages: [{ role: "user", content: `Write the ${seed.kind} page titled "${seed.title}".` }],
+  });
+
+  const now = new Date().toISOString();
+  const existing = await safeReadFile(pagePath);
+  const existingMeta = existing ? parseFrontmatter(existing).meta : null;
+  const createdAt = typeof existingMeta?.createdAt === "string" ? existingMeta.createdAt : now;
+  const typedFields: WikiFrontmatter = {
+    title: seed.title,
+    summary: seed.summary,
+    sources: [],
+    kind: seed.kind,
+    createdAt,
+    updatedAt: now,
+  };
+  const frontmatterFields: Record<string, unknown> = { ...typedFields };
+  addObsidianMeta(frontmatterFields, seed.title, []);
+  const frontmatter = buildFrontmatter(frontmatterFields);
+  return await writePageIfValid(pagePath, `${frontmatter}\n\n${pageBody}\n`, seed.title);
+}
+
+/** Load the bodies of the related concept pages a seed page should weave together. */
+async function loadSeedRelatedPages(root: string, slugs: string[]): Promise<string> {
+  if (slugs.length === 0) return "";
+  const contents: string[] = [];
+  for (const slug of slugs) {
+    const pagePath = path.join(root, CONCEPTS_DIR, `${slug}.md`);
+    const content = await safeReadFile(pagePath);
+    if (content) contents.push(content);
+  }
+  return contents.join("\n\n---\n\n");
 }
 
 /**
@@ -529,7 +660,6 @@ async function extractConcepts(
 
   return parseConcepts(rawOutput);
 }
-
 
 /**
  * Validate and atomically write a wiki page, logging the result.
