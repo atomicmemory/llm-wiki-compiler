@@ -288,18 +288,22 @@ export async function checkContradictedPages(root: string): Promise<LintResult[]
 }
 
 /**
- * Flag pages with too many inferred paragraphs unsupported by direct citations.
- * Uses the metadata-reported count when present and falls back to counting
- * uncited prose paragraphs in the body.
+ * Flag pages with too many inferred paragraphs unsupported by direct
+ * citations. Always derived from the rendered page body — the body is
+ * the single source of truth, no metadata field is consulted. Earlier
+ * versions trusted an LLM-estimated `inferredParagraphs` frontmatter
+ * field, but that estimate was made before the page even existed and
+ * routinely disagreed with what the model actually produced. Counting
+ * uncited prose paragraphs in the rendered body matches what a
+ * reviewer would see and survives hand-edits.
  */
 export async function checkInferredWithoutCitations(root: string): Promise<LintResult[]> {
   const pages = await collectAllPages(root);
   const results: LintResult[] = [];
 
   for (const page of pages) {
-    const { meta, body } = parseFrontmatter(page.content);
-    const provenance = parseProvenanceMetadata(meta);
-    const inferred = provenance.inferredParagraphs ?? countUncitedProseParagraphs(body);
+    const { body } = parseFrontmatter(page.content);
+    const inferred = countUncitedProseParagraphs(body);
     if (inferred <= MAX_INFERRED_PARAGRAPHS_WITHOUT_CITATIONS) continue;
     results.push({
       rule: "excess-inferred-paragraphs",

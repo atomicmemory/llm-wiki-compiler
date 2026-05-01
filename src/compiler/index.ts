@@ -451,13 +451,6 @@ export function reconcileConceptMetadata(
   }
   reconciled.contradictedBy = refs.length > 0 ? refs : undefined;
 
-  // Max inferredParagraphs — any source flagging inference raises the count.
-  if (typeof incoming.inferredParagraphs === "number") {
-    reconciled.inferredParagraphs = typeof existing.inferredParagraphs === "number"
-      ? Math.max(existing.inferredParagraphs, incoming.inferredParagraphs)
-      : incoming.inferredParagraphs;
-  }
-
   return reconciled;
 }
 

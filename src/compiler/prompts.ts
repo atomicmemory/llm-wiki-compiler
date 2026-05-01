@@ -88,11 +88,6 @@ export const CONCEPT_EXTRACTION_TOOL = {
               },
               description: "Slugs of other concepts whose evidence contradicts this one.",
             },
-            inferred_paragraphs: {
-              type: "integer",
-              description:
-                "Estimated number of paragraphs in the page that will be inferred rather than directly cited.",
-            },
           },
           required: ["concept", "summary", "is_new"],
         },
@@ -134,8 +129,6 @@ export function buildExtractionPrompt(
     "    or 'ambiguous' if the source is contradictory or unclear.",
     "  - contradicted_by: slugs of other concepts (in this batch or the index)",
     "    whose evidence conflicts with this one.",
-    "  - inferred_paragraphs: estimated number of paragraphs in the resulting",
-    "    page that will be inferred rather than directly citable.",
     indexSection,
     "\n\n--- SOURCE DOCUMENT ---\n\n",
     sourceContent,
@@ -206,7 +199,6 @@ interface RawConcept {
   confidence?: unknown;
   provenance_state?: unknown;
   contradicted_by?: unknown;
-  inferred_paragraphs?: unknown;
 }
 
 /** True if the raw concept has the required string/boolean fields. */
@@ -248,10 +240,6 @@ function mapRawConcept(c: RawConcept): ExtractedConcept {
     confidence: typeof c.confidence === "number" ? c.confidence : undefined,
     provenanceState: provenance,
     contradictedBy: coerceContradictedBy(c.contradicted_by),
-    inferredParagraphs: typeof c.inferred_paragraphs === "number" &&
-      Number.isInteger(c.inferred_paragraphs) && c.inferred_paragraphs >= 0
-      ? c.inferred_paragraphs
-      : undefined,
   };
 }
 

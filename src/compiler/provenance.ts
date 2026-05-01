@@ -30,9 +30,6 @@ export function addProvenanceMeta(
   if (concept.contradictedBy && concept.contradictedBy.length > 0) {
     fields.contradictedBy = concept.contradictedBy;
   }
-  if (typeof concept.inferredParagraphs === "number") {
-    fields.inferredParagraphs = concept.inferredParagraphs;
-  }
 }
 
 /**

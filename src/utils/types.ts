@@ -25,16 +25,22 @@ export interface ContradictionRef {
 
 /**
  * Provenance metadata shared between extraction-time concept records and
- * page-frontmatter records. Both surfaces carry the same four optional
- * fields — confidence, lifecycle state, contradictions, and inferred
- * paragraph count — so a single shared shape keeps the two ends of the
- * pipeline from drifting apart as new fields are added.
+ * page-frontmatter records. Both surfaces carry the same three optional
+ * fields — confidence, lifecycle state, and contradictions — so a single
+ * shared shape keeps the two ends of the pipeline from drifting apart as
+ * new fields are added.
  *
  * Extended by {@link ExtractedConcept} and {@link WikiFrontmatter} via
  * `interface … extends ProvenanceMetadata`, so the JSON shapes
  * serialised on disk and over the LLM tool boundary stay byte-identical
  * to the previous flat layout (TypeScript erases the indirection at
  * compile time).
+ *
+ * `inferredParagraphs` used to live here too but was an unreliable
+ * extraction-time guess about the future page body. It is now derived
+ * from the rendered body at lint time (see
+ * `checkInferredWithoutCitations`) — body is the single source of
+ * truth, no metadata field involved.
  */
 export interface ProvenanceMetadata {
   /** Numeric confidence in 0..1 — overall confidence in the content. */
@@ -43,8 +49,6 @@ export interface ProvenanceMetadata {
   provenanceState?: ProvenanceState;
   /** Slugs of other concepts/pages whose evidence contradicts this one. */
   contradictedBy?: ContradictionRef[];
-  /** Number of paragraphs that are inferred rather than directly extracted. */
-  inferredParagraphs?: number;
 }
 
 /** A single concept extracted from a source by the LLM. */

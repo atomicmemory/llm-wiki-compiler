@@ -35,7 +35,6 @@ function buildExtractionResponse(): string {
         confidence: 0.9,
         provenance_state: "extracted",
         contradicted_by: [],
-        inferred_paragraphs: 0,
       },
     ],
   });

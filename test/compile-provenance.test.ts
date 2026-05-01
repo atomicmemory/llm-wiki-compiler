@@ -35,7 +35,6 @@ function buildExtractionResponse(): string {
         confidence: 0.3,
         provenance_state: "inferred",
         contradicted_by: [{ slug: "other", reason: "conflicting evidence" }],
-        inferred_paragraphs: 2,
       },
     ],
   });
@@ -69,7 +68,6 @@ describe("compile-path provenance metadata", () => {
     expect(provenance.contradictedBy).toEqual([
       { slug: "other", reason: "conflicting evidence" },
     ]);
-    expect(provenance.inferredParagraphs).toBe(2);
   });
 
   it("emits a contradiction warning to console during compilation", async () => {
