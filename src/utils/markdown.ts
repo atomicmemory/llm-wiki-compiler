@@ -10,6 +10,7 @@ import yaml from "js-yaml";
 import type {
   ClaimCitation,
   ContradictionRef,
+  ProvenanceMetadata,
   ProvenanceState,
   SourceSpan,
 } from "./types.js";
@@ -30,14 +31,6 @@ const VALID_PROVENANCE_STATES: ReadonlySet<ProvenanceState> = new Set([
   "inferred",
   "ambiguous",
 ]);
-
-/** Provenance metadata parsed from a page's frontmatter. */
-interface ProvenanceMetadata {
-  confidence?: number;
-  provenanceState?: ProvenanceState;
-  contradictedBy?: ContradictionRef[];
-  inferredParagraphs?: number;
-}
 
 /**
  * Convert a human-readable concept title to a filename slug.
