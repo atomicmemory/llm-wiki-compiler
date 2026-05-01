@@ -229,17 +229,16 @@ confidence: 0.82           # 0–1, LLM-reported confidence in the synthesized p
 provenanceState: merged    # extracted | merged | inferred | ambiguous
 contradictedBy:
   - slug: probabilistic-reasoning
-inferredParagraphs: 1      # paragraphs the LLM marked as inferred (vs cited)
 ---
 ```
 
-When multiple sources merge into one slug, metadata is reconciled: `min` confidence, `provenanceState = 'merged'`, union of `contradictedBy` (deduped by slug), `max` `inferredParagraphs`.
+When multiple sources merge into one slug, metadata is reconciled: `min` confidence, `provenanceState = 'merged'`, union of `contradictedBy` (deduped by slug).
 
 `llmwiki lint` adds three rules that surface this metadata:
 
 - `low-confidence` — flags pages with `confidence` below a threshold
 - `contradicted-page` — flags pages with non-empty `contradictedBy`
-- `excess-inferred-paragraphs` — flags pages with too many inferred paragraphs without citations
+- `excess-inferred-paragraphs` — flags pages whose body has too many uncited prose paragraphs (counted directly from the rendered text — the body is the single source of truth, no frontmatter field involved)
 
 ## Claim-level provenance
 

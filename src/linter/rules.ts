@@ -316,8 +316,15 @@ export async function checkInferredWithoutCitations(root: string): Promise<LintR
   return results;
 }
 
-/** Match a paragraph that looks like prose (not a heading, list, or code block). */
-const PROSE_PARAGRAPH_LEAD = /^[A-Za-z]/;
+/**
+ * Match a paragraph that looks like prose (not a heading, list, or code
+ * block). Uses the Unicode `Letter` property so non-ASCII pages
+ * generated via `--lang Chinese`, `--lang Japanese`, etc. (#46) are
+ * still detected — the previous `[A-Za-z]` form silently dropped CJK,
+ * Cyrillic, Greek, and Arabic prose, leaving
+ * `excess-inferred-paragraphs` blind on those pages.
+ */
+const PROSE_PARAGRAPH_LEAD = /^\p{L}/u;
 
 /** Count prose paragraphs in a body that lack a ^[citation] marker. */
 function countUncitedProseParagraphs(body: string): number {

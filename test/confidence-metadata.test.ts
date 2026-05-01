@@ -202,6 +202,24 @@ describe("checkInferredWithoutCitations", () => {
     const results = await checkInferredWithoutCitations(tmpDir);
     expect(results).toHaveLength(0);
   });
+
+  // Prose detection must use Unicode letter properties so non-ASCII pages
+  // generated via `--lang Chinese`, `--lang Japanese`, etc. (#46) are
+  // counted. The previous `[A-Za-z]` pattern silently dropped CJK,
+  // Cyrillic, Greek, and Arabic prose, leaving the rule blind on those
+  // pages.
+  it("counts non-ASCII prose paragraphs (CJK, Cyrillic, Japanese)", async () => {
+    const body = [
+      "测试段落一,这是中文第一段。",
+      "测试段落二,这是中文第二段。",
+      "Привет — это третий абзац на русском языке.",
+      "これは日本語の段落です。",
+    ].join("\n\n");
+    await writeConcept("multilang", `---\ntitle: Multi\n---\n${body}`);
+    const results = await checkInferredWithoutCitations(tmpDir);
+    expect(results).toHaveLength(1);
+    expect(results[0].message).toContain("4 inferred paragraphs");
+  });
 });
 
 describe("reconcileConceptMetadata", () => {

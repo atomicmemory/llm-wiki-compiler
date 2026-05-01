@@ -422,7 +422,9 @@ interface MergedConcept {
  * - confidence: min (most pessimistic value wins)
  * - provenanceState: always 'merged' once two sources are involved
  * - contradictedBy: union by slug (deduplicating on slug identity)
- * - inferredParagraphs: max (any source claiming inference wins)
+ *
+ * `inferredParagraphs` is no longer reconciled — it is derived from the
+ * rendered page body at lint time, not from extraction metadata.
  */
 export function reconcileConceptMetadata(
   existing: ExtractedConcept,
