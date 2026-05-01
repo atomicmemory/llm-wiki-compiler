@@ -18,7 +18,7 @@
  *   - reviewShowCommand prints the new block when populated
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import path from "path";
 import { writeFile, mkdir } from "fs/promises";
 import {
@@ -26,8 +26,8 @@ import {
   checkPageBrokenCitations,
 } from "../src/linter/rules.js";
 import { writeCandidate, readCandidate } from "../src/compiler/candidates.js";
-import reviewShowCommand from "../src/commands/review-show.js";
 import { useTempRoot } from "./fixtures/temp-root.js";
+import { captureShowOutput } from "./fixtures/review-show-helpers.js";
 import type { LintResult } from "../src/linter/types.js";
 
 const root = useTempRoot(["sources"]);
@@ -154,13 +154,6 @@ describe("candidate provenance violations — persistence", () => {
     expect(candidate.provenanceViolations).toBeUndefined();
   });
 });
-
-/** Run reviewShowCommand for a candidate and return all console.log output. */
-async function captureShowOutput(candidateId: string): Promise<string> {
-  const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-  await reviewShowCommand(candidateId);
-  return logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
-}
 
 describe("review show — provenance violations display", () => {
   it("prints provenance block when the candidate has provenanceViolations", async () => {

@@ -61,23 +61,33 @@ async function readOnlyCandidate(cwd: string): Promise<{
   return JSON.parse(await readFile(path.join(dir, files[0]), "utf-8"));
 }
 
+/**
+ * Stand up aimock with the canned extraction + a stubbed page body, run
+ * `compile --review` through the CLI subprocess, and return the parsed
+ * single candidate. Centralised so the per-test bodies focus on the
+ * assertion that distinguishes them.
+ */
+async function compileReviewWithStubbedBody(stubBody: string): Promise<{
+  body: string;
+  schemaViolations?: unknown[];
+  provenanceViolations?: unknown[];
+}> {
+  const handle = await aimock.start();
+  stubExtraction(handle);
+  handle.mock.onMessage(/.*/, { content: stubBody });
+  const cwd = await aimock.makeWorkspace("# Source\n\nA short source for the review test.\n");
+  const result = await runCLI(["compile", "--review"], cwd, mockClaudeEnv(handle));
+  expectCLIExit(result, 0);
+  return readOnlyCandidate(cwd);
+}
+
 describe("compile --review provenance lint integration", () => {
   it("attaches provenanceViolations when the candidate body has malformed claim citations", async () => {
-    const handle = await aimock.start();
-    stubExtraction(handle);
-    // Stub the page body so it ships TWO malformed claim citations
-    // (`:abc` and `#X`) — both should surface as findings.
-    handle.mock.onMessage(/.*/, {
-      content:
-        "First paragraph drawing from the source. ^[source.md:abc]\n\n" +
+    // Body ships TWO malformed claim citations (`:abc` and `#X`) — both surface.
+    const candidate = await compileReviewWithStubbedBody(
+      "First paragraph drawing from the source. ^[source.md:abc]\n\n" +
         "Second paragraph with a hash-form malformed span. ^[source.md#X]\n",
-    });
-
-    const cwd = await aimock.makeWorkspace("# Source\n\nA short source for the review test.\n");
-    const result = await runCLI(["compile", "--review"], cwd, mockClaudeEnv(handle));
-    expectCLIExit(result, 0);
-
-    const candidate = await readOnlyCandidate(cwd);
+    );
     expect(candidate.provenanceViolations).toBeDefined();
     expect(candidate.provenanceViolations!.length).toBeGreaterThanOrEqual(2);
     const firstRule = (candidate.provenanceViolations![0] as { rule?: unknown }).rule;
@@ -85,36 +95,20 @@ describe("compile --review provenance lint integration", () => {
   }, 30_000);
 
   it("attaches provenanceViolations when the candidate body cites a missing source file", async () => {
-    const handle = await aimock.start();
-    stubExtraction(handle);
-    // Body cites a source file that doesn't exist under sources/.
-    handle.mock.onMessage(/.*/, {
-      content: "Body with an inline citation to a non-existent source. ^[does-not-exist.md]\n",
-    });
-
-    const cwd = await aimock.makeWorkspace("# Source\n\nAnother short source.\n");
-    const result = await runCLI(["compile", "--review"], cwd, mockClaudeEnv(handle));
-    expectCLIExit(result, 0);
-
-    const candidate = await readOnlyCandidate(cwd);
+    const candidate = await compileReviewWithStubbedBody(
+      "Body with an inline citation to a non-existent source. ^[does-not-exist.md]\n",
+    );
     expect(candidate.provenanceViolations).toBeDefined();
     const rules = (candidate.provenanceViolations as Array<{ rule: string }>).map((v) => v.rule);
     expect(rules).toContain("broken-citation");
   }, 30_000);
 
   it("omits provenanceViolations when the candidate body has clean citations", async () => {
-    const handle = await aimock.start();
-    stubExtraction(handle);
-    handle.mock.onMessage(/.*/, {
-      content: "Body without any citation markers — clean.\n",
-    });
-
-    const cwd = await aimock.makeWorkspace("# Source\n\nClean source.\n");
-    const result = await runCLI(["compile", "--review"], cwd, mockClaudeEnv(handle));
-    expectCLIExit(result, 0);
-
-    const candidate = await readOnlyCandidate(cwd);
+    const cleanBody = "Body without any citation markers — clean.\n";
+    const candidate = await compileReviewWithStubbedBody(cleanBody);
     expect(candidate.provenanceViolations).toBeUndefined();
-    expect(candidate.body).toContain(CONCEPT_SLUG === "" ? "" : ""); // sanity: body present
+    // Real assertion replacing the prior no-op: the stubbed body content
+    // must round-trip through the candidate write.
+    expect(candidate.body).toContain("Body without any citation markers");
   }, 30_000);
 });
