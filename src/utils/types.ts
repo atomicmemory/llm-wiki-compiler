@@ -23,23 +23,36 @@ export interface ContradictionRef {
   reason?: string;
 }
 
+/**
+ * Provenance metadata shared between extraction-time concept records and
+ * page-frontmatter records. Both surfaces carry the same four optional
+ * fields — confidence, lifecycle state, contradictions, and inferred
+ * paragraph count — so a single shared shape keeps the two ends of the
+ * pipeline from drifting apart as new fields are added.
+ *
+ * Extended by {@link ExtractedConcept} and {@link WikiFrontmatter} via
+ * `interface … extends ProvenanceMetadata`, so the JSON shapes
+ * serialised on disk and over the LLM tool boundary stay byte-identical
+ * to the previous flat layout (TypeScript erases the indirection at
+ * compile time).
+ */
+export interface ProvenanceMetadata {
+  /** Numeric confidence in 0..1 — overall confidence in the content. */
+  confidence?: number;
+  /** Lifecycle state describing how the content was produced. */
+  provenanceState?: ProvenanceState;
+  /** Slugs of other concepts/pages whose evidence contradicts this one. */
+  contradictedBy?: ContradictionRef[];
+  /** Number of paragraphs that are inferred rather than directly extracted. */
+  inferredParagraphs?: number;
+}
+
 /** A single concept extracted from a source by the LLM. */
-export interface ExtractedConcept {
+export interface ExtractedConcept extends ProvenanceMetadata {
   concept: string;
   summary: string;
   is_new: boolean;
   tags?: string[];
-  /** Numeric confidence in 0..1 — how certain the model is in this concept. */
-  confidence?: number;
-  /** Lifecycle state describing how this concept was produced. */
-  provenanceState?: ProvenanceState;
-  /** Slugs of concepts whose evidence contradicts this one. */
-  contradictedBy?: ContradictionRef[];
-  /**
-   * Number of paragraphs the model considers inferred (not directly extracted).
-   * Used by the inferred-without-citations lint rule.
-   */
-  inferredParagraphs?: number;
 }
 
 /** Per-source entry in .llmwiki/state.json. */
@@ -65,7 +78,7 @@ export interface SourceChange {
 }
 
 /** Wiki page frontmatter parsed from YAML. */
-export interface WikiFrontmatter {
+export interface WikiFrontmatter extends ProvenanceMetadata {
   title: string;
   sources: string[];
   summary: string;
@@ -81,14 +94,6 @@ export interface WikiFrontmatter {
    * type-only so it is erased at compile time and creates no runtime cycle.
    */
   kind?: PageKind;
-  /** Numeric confidence in 0..1 — overall confidence in the page's claims. */
-  confidence?: number;
-  /** Lifecycle state describing how the page's content was produced. */
-  provenanceState?: ProvenanceState;
-  /** Slugs of pages whose evidence contradicts this one. */
-  contradictedBy?: ContradictionRef[];
-  /** Number of inferred paragraphs in the page body without direct citations. */
-  inferredParagraphs?: number;
 }
 
 /** Summary entry used in index.md generation. */
