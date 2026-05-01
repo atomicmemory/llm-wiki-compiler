@@ -49,6 +49,13 @@ interface CandidateDraft {
    * Omit (or pass `undefined`) when the candidate body is clean.
    */
   schemaViolations?: LintResult[];
+  /**
+   * Provenance lint violations for the candidate body — malformed claim
+   * citations, out-of-bounds spans, or missing source files. Surfaced
+   * alongside schema violations so reviewers see citation issues before
+   * approving.
+   */
+  provenanceViolations?: LintResult[];
 }
 
 /** Build a deterministic-but-unique id from a slug and a short random suffix. */
@@ -88,6 +95,7 @@ export async function writeCandidate(
     generatedAt: new Date().toISOString(),
     ...(draft.sourceStates ? { sourceStates: draft.sourceStates } : {}),
     ...(draft.schemaViolations ? { schemaViolations: draft.schemaViolations } : {}),
+    ...(draft.provenanceViolations ? { provenanceViolations: draft.provenanceViolations } : {}),
   };
 
   await atomicWrite(candidatePath(root, candidate.id), JSON.stringify(candidate, null, 2));

@@ -48,7 +48,12 @@ import { buildBudgetedCombinedContent, type SourceSlice } from "./prompt-budget.
 import { addObsidianMeta, generateMOC } from "./obsidian.js";
 import { updateEmbeddings } from "../utils/embeddings.js";
 import { writeCandidate } from "./candidates.js";
-import { checkPageCrossLinks } from "../linter/rules.js";
+import {
+  checkPageBrokenCitations,
+  checkPageCrossLinks,
+  checkPageMalformedCitations,
+} from "../linter/rules.js";
+import type { LintResult } from "../linter/types.js";
 import { renderMergedPageContent } from "./page-renderer.js";
 import * as output from "../utils/output.js";
 import {
@@ -554,11 +559,18 @@ async function persistReviewCandidate(
   sourceStates: SourceStateMap,
   schema: SchemaConfig,
 ): Promise<MergedPageOutcome> {
-  // Run schema-aware lint against the candidate body so violations are visible
-  // in `review show` before a reviewer approves the page. The virtual file path
-  // uses the slug so diagnostics are identifiable without a real disk path.
+  // Run schema-aware AND provenance-aware lint against the candidate body so
+  // both classes of violation are visible in `review show` before a reviewer
+  // approves the page. The virtual file path uses the slug so diagnostics
+  // are identifiable without a real disk path. Provenance lint covers the
+  // citation rules that previously only ran on the post-promotion compile.
   const virtualPath = `wiki/concepts/${entry.slug}.md`;
-  const violations = checkPageCrossLinks(fullPage, virtualPath, schema);
+  const schemaViolations = checkPageCrossLinks(fullPage, virtualPath, schema);
+  const provenanceViolations = await collectCandidateProvenanceViolations(
+    root,
+    fullPage,
+    virtualPath,
+  );
 
   const candidate: ReviewCandidate = await writeCandidate(root, {
     title: entry.concept.concept,
@@ -567,10 +579,31 @@ async function persistReviewCandidate(
     sources: entry.sourceFiles,
     body: fullPage,
     sourceStates: pickStatesForSources(sourceStates, entry.sourceFiles),
-    schemaViolations: violations.length > 0 ? violations : undefined,
+    schemaViolations: schemaViolations.length > 0 ? schemaViolations : undefined,
+    provenanceViolations:
+      provenanceViolations.length > 0 ? provenanceViolations : undefined,
   });
   output.status("?", output.info(`Candidate ready: ${candidate.id} (${entry.slug})`));
   return { candidateId: candidate.id };
+}
+
+/**
+ * Run the in-memory provenance lint rules against a candidate body:
+ * malformed claim citations + broken-source / out-of-bounds line spans.
+ * Returns the combined diagnostics so writeCandidate can persist them.
+ */
+async function collectCandidateProvenanceViolations(
+  root: string,
+  fullPage: string,
+  virtualPath: string,
+): Promise<LintResult[]> {
+  const malformed = checkPageMalformedCitations(fullPage, virtualPath);
+  const broken = await checkPageBrokenCitations(
+    fullPage,
+    virtualPath,
+    path.join(root, SOURCES_DIR),
+  );
+  return [...malformed, ...broken];
 }
 
 /**

@@ -458,15 +458,44 @@ export async function checkBrokenCitations(root: string): Promise<LintResult[]> 
   const pages = await collectAllPages(root);
   const sourcesDir = path.join(root, SOURCES_DIR);
   const results: LintResult[] = [];
-  /** Cache of source filename → line count to avoid repeated reads. */
   const lineCountCache = new Map<string, number>();
 
   for (const page of pages) {
-    for (const { captured, line } of findMatchesInContent(page.content, CITATION_PATTERN)) {
-      await collectBrokenForMarker(captured, line, page.filePath, sourcesDir, lineCountCache, results);
-    }
+    const pageFindings = await checkPageBrokenCitations(
+      page.content,
+      page.filePath,
+      sourcesDir,
+      lineCountCache,
+    );
+    results.push(...pageFindings);
   }
 
+  return results;
+}
+
+/**
+ * Pure-body variant of {@link checkBrokenCitations} that inspects a single
+ * page's content against an in-memory or on-disk sources directory. Used
+ * by the on-disk lint walker above, and by the in-memory candidate-lint
+ * path so `compile --review` surfaces broken-source-file and out-of-bounds
+ * span findings before a reviewer approves the candidate.
+ *
+ * @param content - Full page markdown including frontmatter.
+ * @param filePath - Logical path embedded in diagnostics (may be virtual).
+ * @param sourcesDir - Absolute path to the project's sources/ directory.
+ * @param lineCountCache - Optional cross-page cache; provide one when
+ *   linting many pages so source file line counts aren't re-read.
+ */
+export async function checkPageBrokenCitations(
+  content: string,
+  filePath: string,
+  sourcesDir: string,
+  lineCountCache: Map<string, number> = new Map(),
+): Promise<LintResult[]> {
+  const results: LintResult[] = [];
+  for (const { captured, line } of findMatchesInContent(content, CITATION_PATTERN)) {
+    await collectBrokenForMarker(captured, line, filePath, sourcesDir, lineCountCache, results);
+  }
   return results;
 }
 
@@ -530,21 +559,31 @@ async function resolveLineCount(
 export async function checkMalformedClaimCitations(root: string): Promise<LintResult[]> {
   const pages = await collectAllPages(root);
   const results: LintResult[] = [];
-
   for (const page of pages) {
-    for (const { captured, line } of findMatchesInContent(page.content, CITATION_PATTERN)) {
-      for (const part of captured.split(",")) {
-        if (!isMalformedCitationEntry(part)) continue;
-        results.push({
-          rule: "malformed-claim-citation",
-          severity: "error",
-          file: page.filePath,
-          message: `Malformed claim citation ^[${captured}] — expected file.md, file.md:N-N, or file.md#LN-LN`,
-          line,
-        });
-      }
+    results.push(...checkPageMalformedCitations(page.content, page.filePath));
+  }
+  return results;
+}
+
+/**
+ * Pure-body variant of {@link checkMalformedClaimCitations} that inspects
+ * a single page's content. Used by both the on-disk lint walker above and
+ * the in-memory candidate-lint path so `compile --review` surfaces
+ * malformed claim citations before a reviewer approves the candidate.
+ */
+export function checkPageMalformedCitations(content: string, filePath: string): LintResult[] {
+  const results: LintResult[] = [];
+  for (const { captured, line } of findMatchesInContent(content, CITATION_PATTERN)) {
+    for (const part of captured.split(",")) {
+      if (!isMalformedCitationEntry(part)) continue;
+      results.push({
+        rule: "malformed-claim-citation",
+        severity: "error",
+        file: filePath,
+        message: `Malformed claim citation ^[${captured}] — expected file.md, file.md:N-N, or file.md#LN-LN`,
+        line,
+      });
     }
   }
-
   return results;
 }

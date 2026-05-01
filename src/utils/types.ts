@@ -156,6 +156,16 @@ export interface ReviewCandidate {
    * `review show` surfaces these so reviewers see failures before approving.
    */
   schemaViolations?: import("../linter/types.js").LintResult[];
+  /**
+   * Provenance lint violations detected at candidate-generation time.
+   *
+   * Covers malformed claim citations (`^[file.md:abc]`), out-of-bounds
+   * line spans, and citations referencing source files that don't exist.
+   * Surfaced in `review show` next to schema violations so reviewers
+   * catch citation issues before approving — these used to only show up
+   * on the next normal `compile` after the page was already promoted.
+   */
+  provenanceViolations?: import("../linter/types.js").LintResult[];
 }
 
 /** A single chunk citation surfaced as part of a query result. */
