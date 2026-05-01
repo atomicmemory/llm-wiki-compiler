@@ -30,4 +30,12 @@ export default async function reviewShowCommand(id: string): Promise<void> {
       output.status("!", output.warn(`[${v.severity}] ${v.message}`));
     }
   }
+
+  if (candidate.provenanceViolations && candidate.provenanceViolations.length > 0) {
+    console.log();
+    output.header("Provenance violations");
+    for (const v of candidate.provenanceViolations) {
+      output.status("!", output.warn(`[${v.severity}] ${v.message}`));
+    }
+  }
 }

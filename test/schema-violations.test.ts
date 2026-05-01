@@ -12,10 +12,10 @@
  * - reviewShowCommand prints nothing extra when no violations
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { writeCandidate, readCandidate } from "../src/compiler/candidates.js";
-import reviewShowCommand from "../src/commands/review-show.js";
 import { useTempRoot } from "./fixtures/temp-root.js";
+import { captureShowOutput } from "./fixtures/review-show-helpers.js";
 import type { LintResult } from "../src/linter/types.js";
 
 const root = useTempRoot(["sources"]);
@@ -82,13 +82,6 @@ describe("candidate schema violations — persistence", () => {
     expect(candidate.schemaViolations).toBeUndefined();
   });
 });
-
-/** Run reviewShowCommand for a candidate and return all console.log output. */
-async function captureShowOutput(candidateId: string): Promise<string> {
-  const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-  await reviewShowCommand(candidateId);
-  return logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
-}
 
 describe("review show — schema violations display", () => {
   it("prints violations block when the candidate has schemaViolations", async () => {
