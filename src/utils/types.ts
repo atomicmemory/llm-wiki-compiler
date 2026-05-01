@@ -30,10 +30,11 @@ export interface ContradictionRef {
  * paragraph count — so a single shared shape keeps the two ends of the
  * pipeline from drifting apart as new fields are added.
  *
- * Composed (not extended) into {@link ExtractedConcept} and
- * {@link WikiFrontmatter} so the JSON shapes serialised on disk and over
- * the LLM tool boundary stay byte-identical to the previous flat layout
- * (TypeScript erases the indirection at compile time).
+ * Extended by {@link ExtractedConcept} and {@link WikiFrontmatter} via
+ * `interface … extends ProvenanceMetadata`, so the JSON shapes
+ * serialised on disk and over the LLM tool boundary stay byte-identical
+ * to the previous flat layout (TypeScript erases the indirection at
+ * compile time).
  */
 export interface ProvenanceMetadata {
   /** Numeric confidence in 0..1 — overall confidence in the content. */

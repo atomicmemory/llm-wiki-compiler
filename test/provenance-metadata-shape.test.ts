@@ -9,9 +9,16 @@
  * src/utils/types.ts, plus drops the duplicate private interface that
  * lived in src/utils/markdown.ts.
  *
- * The assertions below are static type-system checks expressed as
- * runtime assignments so a future re-introduction of the drift fails
- * `npx tsc --noEmit` rather than silently re-creating the gap.
+ * The two type-level assertions at the top are the strict guard: they
+ * compile only when every key present on ProvenanceMetadata is also a
+ * key of ExtractedConcept / WikiFrontmatter. Removing the `extends`
+ * clause and inlining the fields would still pass — but DROPPING any
+ * ProvenanceMetadata key from one of the two surfaces (the actual
+ * drift codex worried about) would break `npx tsc --noEmit`.
+ *
+ * The runtime assignment tests below are weaker (every field is
+ * optional, so an unrelated empty object would also be assignable) but
+ * exercise the runtime field shape end-to-end.
  */
 
 import { describe, it, expect } from "vitest";
@@ -21,8 +28,22 @@ import type {
   WikiFrontmatter,
 } from "../src/utils/types.js";
 
+// Type-level assertions — fail to compile if ExtractedConcept or
+// WikiFrontmatter no longer carry every key from ProvenanceMetadata.
+// Conditional resolves to `true` when the keys are a superset, otherwise
+// to `never`, which would make the constant assignment fail tsc.
+type AssertExtractedConceptCoversProvenance =
+  keyof ProvenanceMetadata extends keyof ExtractedConcept ? true : never;
+type AssertWikiFrontmatterCoversProvenance =
+  keyof ProvenanceMetadata extends keyof WikiFrontmatter ? true : never;
+const _extractedConceptCovers: AssertExtractedConceptCoversProvenance = true;
+const _wikiFrontmatterCovers: AssertWikiFrontmatterCoversProvenance = true;
+// Reference the constants so a future "unused variable" sweep keeps them.
+void _extractedConceptCovers;
+void _wikiFrontmatterCovers;
+
 describe("ProvenanceMetadata shared shape", () => {
-  it("ExtractedConcept satisfies ProvenanceMetadata so the four fields are unified", () => {
+  it("ExtractedConcept carries every ProvenanceMetadata field at runtime", () => {
     const concept: ExtractedConcept = {
       concept: "Concept",
       summary: "summary",
@@ -32,16 +53,12 @@ describe("ProvenanceMetadata shared shape", () => {
       contradictedBy: [{ slug: "other" }],
       inferredParagraphs: 2,
     };
-    // Compile-time assertion: assigning to ProvenanceMetadata proves the
-    // shared fields are structurally compatible. If a future change drops
-    // a field from ProvenanceMetadata or renames it on ExtractedConcept,
-    // this line stops type-checking.
     const provenance: ProvenanceMetadata = concept;
     expect(provenance.confidence).toBe(0.9);
     expect(provenance.provenanceState).toBe("extracted");
   });
 
-  it("WikiFrontmatter satisfies ProvenanceMetadata for the same reason", () => {
+  it("WikiFrontmatter carries every ProvenanceMetadata field at runtime", () => {
     const frontmatter: WikiFrontmatter = {
       title: "Sample",
       summary: "An example.",
