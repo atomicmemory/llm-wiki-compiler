@@ -362,6 +362,10 @@ interface ParsedLineRange {
  * body has fewer wikilinks than the rule requires. Pages with kind `concept`
  * and a minimum of 0 (the default) generate no diagnostics, so existing
  * projects without a schema file see no behaviour change.
+ *
+ * Implementation delegates to {@link checkPageCrossLinks} per page so the
+ * actual rule logic lives in exactly one place — the on-disk walker just
+ * fans the per-page helper across `collectAllPages`.
  * @param root - Project root directory.
  * @param schema - Resolved schema config.
  */
@@ -371,26 +375,9 @@ export async function checkSchemaCrossLinks(
 ): Promise<LintResult[]> {
   const pages = await collectAllPages(root);
   const results: LintResult[] = [];
-
   for (const page of pages) {
-    const { meta, body } = parseFrontmatter(page.content);
-    const kind = resolvePageKind(meta.kind, schema);
-    const rule = schema.kinds[kind];
-    if (rule.minWikilinks <= 0) continue;
-
-    const linkCount = countWikilinks(body);
-    if (linkCount >= rule.minWikilinks) continue;
-
-    results.push({
-      rule: "schema-cross-link-minimum",
-      severity: "warning",
-      file: page.filePath,
-      message:
-        `Page kind "${kind}" requires at least ${rule.minWikilinks} ` +
-        `[[wikilinks]] but only ${linkCount} found.`,
-    });
+    results.push(...checkPageCrossLinks(page.content, page.filePath, schema));
   }
-
   return results;
 }
 

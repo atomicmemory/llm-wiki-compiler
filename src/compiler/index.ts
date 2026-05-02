@@ -146,6 +146,14 @@ interface PageGenerationResult {
   errors: string[];
   /** Candidate ids written when running in --review mode. Empty otherwise. */
   candidates: string[];
+  /**
+   * Slugs of seed pages written this run (overview / comparison / entity).
+   * Concept pages live on `pages`; seed pages don't fit MergedConcept's
+   * source-list shape, so they're tracked separately here. summarizeCompile
+   * concatenates these into CompileResult.pages so downstream consumers
+   * (MCP, embeddings, programmatic callers) see seed-page changes too.
+   */
+  seedSlugs: string[];
 }
 
 /** Phase 2: generate pages for merged concepts in parallel, capturing errors. */
@@ -173,7 +181,7 @@ async function generatePagesPhase(
       return entry;
     })),
   );
-  return { pages, errors, candidates };
+  return { pages, errors, candidates, seedSlugs: [] };
 }
 
 /** Persist source state for every extraction that produced concepts. */
@@ -213,12 +221,17 @@ function summarizeCompile(
     }
   }
 
+  // Concept-page slugs first, then seed-page slugs from the same run, so
+  // downstream consumers see every page the compile actually produced.
+  // Seed pages are deterministic schema-driven writes; before this they
+  // landed on disk silently and never appeared on CompileResult.pages.
+  const conceptSlugs = generation.pages.map((entry) => entry.slug);
   const baseResult: CompileResult = {
     compiled: buckets.toCompile.length,
     skipped: buckets.unchanged.length,
     deleted: buckets.deleted.length,
     concepts: generation.pages.map((entry) => entry.concept.concept),
-    pages: generation.pages.map((entry) => entry.slug),
+    pages: [...conceptSlugs, ...generation.seedSlugs],
     errors,
   };
   if (options.review) {
@@ -245,14 +258,23 @@ async function runCompilePipeline(
     // no source files changed, so adding a seed page to schema.json takes
     // effect on the next compile without needing a source file edit.
     if (!options.review) {
-      const emptyGeneration: PageGenerationResult = { pages: [], errors: [], candidates: [] };
+      const emptyGeneration: PageGenerationResult = {
+        pages: [],
+        errors: [],
+        candidates: [],
+        seedSlugs: [],
+      };
       await generateSeedPages(root, schema, emptyGeneration);
       // Rebuild index/MOC so the newly-written seed pages become discoverable,
       // and propagate any seed-page validation errors into the returned result.
-      await finalizeWiki(root, emptyGeneration.pages);
+      await finalizeWiki(root, emptyGeneration.pages, emptyGeneration.seedSlugs);
       return {
         ...emptyCompileResult(),
         skipped: buckets.unchanged.length,
+        // Surface seed-page slugs alongside any errors so downstream
+        // consumers (MCP, embeddings, programmatic callers) can see what
+        // landed even on the no-source-changes early-return path.
+        pages: [...emptyGeneration.seedSlugs],
         errors: emptyGeneration.errors,
       };
     }
@@ -290,7 +312,7 @@ async function runCompilePipeline(
     // Seed pages write directly into wiki/, so skip them in review mode
     // to honour the "no wiki/ mutation" contract of that mode.
     await generateSeedPages(root, schema, generation);
-    await finalizeWiki(root, generation.pages);
+    await finalizeWiki(root, generation.pages, generation.seedSlugs);
   }
   return summarizeCompile(buckets, generation, extractions, options);
 }
@@ -352,10 +374,25 @@ async function runExtractionPhases(
   return extractions;
 }
 
-/** Resolve interlinks, regenerate index/MOC, refresh embeddings post-write. */
-async function finalizeWiki(root: string, pages: MergedConcept[]): Promise<void> {
-  const allChangedSlugs = pages.map((entry) => entry.slug);
-  const allNewSlugs = pages.filter((entry) => entry.concept.is_new).map((entry) => entry.slug);
+/**
+ * Resolve interlinks, regenerate index/MOC, refresh embeddings
+ * post-write. Seed-page slugs are folded into both the changed-slug
+ * set (so embeddings refresh covers them) and the new-slug set (so
+ * inbound-link resolution scans existing pages for mentions of seed
+ * titles). Without that, schema-declared seed pages would land on
+ * disk but stay unlinked and absent from the embedding store.
+ */
+async function finalizeWiki(
+  root: string,
+  pages: MergedConcept[],
+  seedSlugs: string[] = [],
+): Promise<void> {
+  const conceptChangedSlugs = pages.map((entry) => entry.slug);
+  const conceptNewSlugs = pages
+    .filter((entry) => entry.concept.is_new)
+    .map((entry) => entry.slug);
+  const allChangedSlugs = [...conceptChangedSlugs, ...seedSlugs];
+  const allNewSlugs = [...conceptNewSlugs, ...seedSlugs];
 
   if (allChangedSlugs.length > 0) {
     output.status("🔗", output.info("Resolving interlinks..."));
@@ -618,9 +655,19 @@ async function generateSeedPages(
 ): Promise<void> {
   if (schema.seedPages.length === 0) return;
   for (const seed of schema.seedPages) {
-    const error = await generateSingleSeedPage(root, schema, seed);
-    if (error) generation.errors.push(error);
+    const result = await generateSingleSeedPage(root, schema, seed);
+    if (result.error) {
+      generation.errors.push(result.error);
+      continue;
+    }
+    generation.seedSlugs.push(result.slug);
   }
+}
+
+/** Outcome of a single seed-page generation: slug always, error when the write failed validation. */
+interface SeedPageOutcome {
+  slug: string;
+  error?: string;
 }
 
 /** Build, prompt, and persist a single seed page. */
@@ -628,7 +675,7 @@ async function generateSingleSeedPage(
   root: string,
   schema: SchemaConfig,
   seed: SeedPage,
-): Promise<string | null> {
+): Promise<SeedPageOutcome> {
   const slug = slugify(seed.title);
   const pagePath = path.join(root, CONCEPTS_DIR, `${slug}.md`);
   const relatedContent = await loadSeedRelatedPages(root, seed.relatedSlugs ?? []);
@@ -654,7 +701,8 @@ async function generateSingleSeedPage(
   const frontmatterFields: Record<string, unknown> = { ...typedFields };
   addObsidianMeta(frontmatterFields, seed.title, []);
   const frontmatter = buildFrontmatter(frontmatterFields);
-  return await writePageIfValid(pagePath, `${frontmatter}\n\n${pageBody}\n`, seed.title);
+  const error = await writePageIfValid(pagePath, `${frontmatter}\n\n${pageBody}\n`, seed.title);
+  return error ? { slug, error } : { slug };
 }
 
 /** Load the bodies of the related concept pages a seed page should weave together. */
