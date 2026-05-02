@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-05-02
+
+Adds session-history ingest (Claude / Codex / Cursor exports), configurable output language, and a defensive cap that prevents `compile` from crashing on popular concepts. Closes a batch of CJK / collision / silent-loss bugs in the ingest path. Tightens `compile --review` so candidates carry both schema AND provenance lint findings before approval. Extracts a shared `ProvenanceMetadata` shape and removes an unreliable LLM extraction-time estimate in favour of body-derived counts.
+
+### Added
+
+- **`llmwiki ingest-session <path>`** — imports AI coding-session exports as wiki sources. Auto-detects three formats: Claude (`.jsonl`), Codex (`.json`), Cursor (`.json`, both `tabs` and flat schemas). Single file or whole directory. Each session lands in `sources/<slug>.md` with frontmatter recording the adapter, source path, ingest timestamp, and (where available) session start/end times. Adapter validation requires ≥ 1 user-or-assistant turn — recognised-but-empty exports fail loudly instead of producing a content-free page.
+- **`LLMWIKI_OUTPUT_LANG` env var + `--lang <code>` CLI flag** on `compile` and `query`. When set, every prompt builder (extraction, page generation, seed page, query answer) appends `Write the output in <lang>.` to the system prompt. Unset preserves current behaviour byte-for-byte. Useful for `--lang Chinese`, `--lang Japanese`, etc.
+- **`compile --review` provenance lint** — review candidates now carry both `schemaViolations` and `provenanceViolations` (malformed claim citations, broken-source / out-of-bounds line spans). `review show` prints both blocks. Reviewers see citation issues before approving a page rather than discovering them on a later compile.
+- **`npm run fallow:ci`** — contributor script that runs `fallow` with the same `--changed-since <PR-base-sha>` scoping the GitHub Action uses, so most CI fallow findings surface locally before pushing. Documented in CONTRIBUTING.md (including the fork-workflow `upstream/main` resolution and the platform-binary parity caveat).
+
+### Fixed
+
+- **Non-ASCII filename ingest** (#35) — `slugify` previously used `\w` without the `/u` flag, so titles like `测试文档` collapsed to the empty string and `ingest` wrote `sources/.md` (a dotfile that subsequent CJK ingests would overwrite). `slugify` now uses Unicode property escapes (`\p{L}`, `\p{N}`); pure-emoji titles that still strip to `""` fail with an actionable error rather than writing a dotfile.
+- **Same-basename source collision** (#36) — two distinct sources slugifying to the same name (e.g. `a/notes.md` and `b/notes.md`) used to silently overwrite. `saveSource` now checks for the collision and falls through to `<slug>-<8-hex-of-source>.md` when the existing file's frontmatter `source` doesn't match. Re-ingesting the same source still overwrites in place — no duplicate accumulation.
+- **Compile crash on popular concepts** (#39) — `mergeExtractions` used to concatenate every contributing source's full content into the page-generation prompt. Linear in source count; reliably blew past the LLM provider's context window once many sources discussed the same topic. New defensive cap (`LLMWIKI_PROMPT_BUDGET_CHARS`, default 200,000) gives every contributing source a fair share of the budget when the raw total would overflow, with a clear truncation marker. Typical workloads stay byte-identical.
+- **Body-derived `excess-inferred-paragraphs`** — the lint rule used to trust an LLM-estimated `inferredParagraphs` frontmatter field when present, falling back to body counting. The estimate was made before the page even existed and routinely disagreed with what the model actually produced. The rule now unconditionally counts uncited prose paragraphs in the rendered body, with Unicode-aware prose detection (`\p{L}`) so pages produced via `--lang Chinese` etc. are correctly counted. Legacy `inferredParagraphs` frontmatter values are intentionally ignored.
+
+### Changed
+
+- **`ProvenanceMetadata` is now a single shared interface** in `src/utils/types.ts` that both `ExtractedConcept` and `WikiFrontmatter` extend. Drops the duplicate private declaration that had drifted into `src/utils/markdown.ts`. JSON shapes serialised on disk and over the LLM tool boundary are byte-identical to before — pure refactor.
+- **`inferredParagraphs` is no longer written to frontmatter or sent to the LLM extractor**. The field has moved entirely to body-derived lint at lint time. Old on-disk pages with the field still parse — the loader just ignores the unrecognised key.
+- **`CompileResult.pages` now includes seed-page slugs** alongside concept-page slugs. Seed pages used to land on disk silently and stay absent from the result; downstream consumers (MCP, embeddings, programmatic callers) had no way to discover them without scanning `wiki/`. They're also threaded into `finalizeWiki` so `resolveLinks` and `updateEmbeddings` cover them.
+- **Lint helper dedupe** — `checkSchemaCrossLinks` (on-disk walker) now delegates to `checkPageCrossLinks` (per-page) so the `schema-cross-link-minimum` rule lives in exactly one place.
+
+### Test infrastructure
+
+- **`useIngestWorkspaces` and `useAimockLifecycle.findSystemPromptByUserMessage`** composables in `test/fixtures/` consolidate temp-workspace and aimock recording boilerplate that had drifted across multiple integration tests.
+- Tests grew from 480 (post-0.5.1) to 632 in this release.
+
+### Contributors
+
+Thanks to **@lllcccwww** for filing four high-quality bug reports back-to-back (#35, #36, #37, #39) — every one had a clear repro and pointed at the offending file:line, which made the fixes obvious. Also thanks to **@babysource** for asking about embedding configuration (#42) and **@ishan5ain** for volunteering to take on the read-only Web UI roadmap item (#38).
+
 ## [0.5.1] - 2026-04-27
 
 Patch release fixing a CLI startup crash that broke 0.5.0 for everyone installing via npm.
