@@ -100,6 +100,21 @@ describe("seed pages generated when no source files changed", () => {
     expect(existsSync(seedPath)).toBe(false);
   });
 
+  it("surfaces successfully-written seed slugs on CompileResult.pages", async () => {
+    // Seed pages are deterministic schema-driven writes that previously
+    // landed on disk silently — they were absent from CompileResult.pages
+    // even though they were just written. Downstream MCP / programmatic
+    // consumers had no way to discover them without scanning wiki/.
+    const seedTitle = "Reportable Overview";
+    await writeSchemaWithSeedPage(root.dir, seedTitle);
+    await stubLLMForSeedPage(seedTitle);
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const result = await compileAndReport(root.dir, {});
+
+    expect(result.pages).toContain("reportable-overview");
+  });
+
   it("propagates seed-page validation errors into CompileResult on the early-return path", async () => {
     const seedTitle = "Broken Overview";
     await writeSchemaWithSeedPage(root.dir, seedTitle);
