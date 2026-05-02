@@ -182,7 +182,7 @@ export function buildPagePrompt(
     "",
     "If a paragraph is your inference rather than a direct extraction, leave it",
     "uncited — downstream lint rules will count uncited paragraphs as 'inferred'",
-    "to compute the page's provenance metadata.",
+    "so lint can surface excess-inferred-paragraphs warnings on review.",
     existingSection,
     relatedSection,
     "\n\n--- SOURCE MATERIAL ---\n\n",
