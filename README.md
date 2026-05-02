@@ -112,6 +112,15 @@ The OpenAI SDK defaults to a 10-minute per-request timeout, which can cut off lo
 
 Defaults: 10 minutes for `openai`, 30 minutes for `ollama` (local models commonly need more).
 
+### Output language
+
+Generated wiki content defaults to whatever language the model produces from the source material — typically English. Override with either:
+
+- `LLMWIKI_OUTPUT_LANG` — e.g. `zh-CN`, `Chinese`, `ja`, `Japanese`. Applies to every prompt the compile and query pipelines make.
+- `--lang <code>` on `llmwiki compile` and `llmwiki query` — same effect, scoped to one invocation. Wins over the env var.
+
+Unset preserves prior behaviour byte-for-byte.
+
 ## Why not just RAG?
 
 RAG retrieves chunks at query time. Every question re-discovers the same relationships from scratch. Nothing accumulates.
@@ -167,8 +176,10 @@ Pages include source attribution in frontmatter. Paragraphs are annotated with `
 | Command | What it does |
 |---------|-------------|
 | `llmwiki ingest <url\|file>` | Fetch a URL or copy a local file into `sources/` |
+| `llmwiki ingest-session <path>` | Import a Claude/Codex/Cursor session export (single file or whole directory) into `sources/` |
 | `llmwiki compile` | Incremental compile: extract concepts, generate wiki pages |
 | `llmwiki compile --review` | Write candidate pages to `.llmwiki/candidates/` instead of `wiki/` so you can review before they land |
+| `llmwiki compile --lang <code>` | Generate wiki content in the given language (e.g. `Chinese`, `ja`, `zh-CN`); also works on `query` |
 | `llmwiki review list` | List pending candidate pages |
 | `llmwiki review show <id>` | Print a candidate's title, summary, and body |
 | `llmwiki review approve <id>` | Promote a candidate into `wiki/` and refresh index/MOC/embeddings |
@@ -177,6 +188,7 @@ Pages include source attribution in frontmatter. Paragraphs are annotated with `
 | `llmwiki schema show` | Print the resolved schema for the current project |
 | `llmwiki query "question"` | Ask questions against your compiled wiki |
 | `llmwiki query "question" --save` | Answer and save the result as a wiki page |
+| `llmwiki export [--target <name>]` | Export the wiki to portable formats — `llms.txt`, `llms-full.txt`, JSON, JSON-LD, GraphML, Marp slides |
 | `llmwiki lint` | Check wiki quality (broken links, orphans, empty pages, low confidence, contradictions, etc.) |
 | `llmwiki watch` | Auto-recompile when `sources/` changes |
 | `llmwiki serve [--root <dir>]` | Start an MCP server exposing wiki tools to AI agents |
@@ -372,6 +384,9 @@ Karpathy describes an abstract pattern for turning raw data into compiled knowle
 Shipped in 0.6.0:
 
 - ✅ Export bundle (`llms.txt`, JSON, JSON-LD, GraphML, Marp slides)
+- ✅ Session-history adapters — `llmwiki ingest-session` for Claude, Codex, and Cursor exports
+- ✅ Configurable output language — `--lang <code>` and `LLMWIKI_OUTPUT_LANG`
+- ✅ Defensive per-concept prompt budget so popular shared concepts don't crash compile
 
 Shipped in 0.5.0:
 
@@ -397,10 +412,6 @@ Shipped in 0.2.0:
 - ✅ Larger-corpus query strategy (semantic search, embeddings)
 - ✅ Deeper Obsidian integration (tags, aliases, Map of Content)
 - ✅ MCP server for agent integration
-
-Next up:
-
-- Session-history adapters (Claude, Codex, Cursor exports)
 
 Future ideas (open to discussion):
 
