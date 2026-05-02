@@ -121,6 +121,14 @@ Generated wiki content defaults to whatever language the model produces from the
 
 Unset preserves prior behaviour byte-for-byte.
 
+### Per-concept prompt budget
+
+When many sources contribute to the same compiled concept, `compile` enforces a per-concept character cap on the combined source content sent to the LLM so popular shared concepts don't blow past the model's context window. Each contributing source gets a fair share when truncation kicks in.
+
+- `LLMWIKI_PROMPT_BUDGET_CHARS` — character ceiling for the combined per-concept prompt. Defaults to `200000` (~50k tokens), which fits modern context windows with headroom. Raise it for larger-context models, lower it for local small-context models.
+
+A truncation warning prints to stderr when the cap fires so you know which concept hit the budget.
+
 ## Why not just RAG?
 
 RAG retrieves chunks at query time. Every question re-discovers the same relationships from scratch. Nothing accumulates.
