@@ -268,16 +268,15 @@ function parseContradictedBy(raw: unknown): ContradictionRef[] | undefined {
   return refs.length > 0 ? refs : undefined;
 }
 
-/** Parse the inferred paragraph count, requiring a non-negative integer. */
-function parseInferredParagraphs(raw: unknown): number | undefined {
-  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 0) return undefined;
-  return raw;
-}
-
 /**
  * Extract provenance metadata fields from a parsed frontmatter record.
  * Defensively handles missing or malformed values so existing pages without
  * the new fields continue to parse correctly.
+ *
+ * Note: legacy pages may also carry an `inferredParagraphs` frontmatter
+ * field from earlier compiles. It is intentionally not parsed here —
+ * the lint rule derives the count from the rendered body instead, so
+ * the cached field is ignored.
  * @param meta - Raw frontmatter object as returned by parseFrontmatter.
  * @returns Typed provenance metadata with only the fields that were present.
  */
@@ -288,7 +287,6 @@ export function parseProvenanceMetadata(
     confidence: parseConfidence(meta.confidence),
     provenanceState: parseProvenanceState(meta.provenanceState),
     contradictedBy: parseContradictedBy(meta.contradictedBy),
-    inferredParagraphs: parseInferredParagraphs(meta.inferredParagraphs),
   };
 }
 

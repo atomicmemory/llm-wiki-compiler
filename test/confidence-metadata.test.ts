@@ -41,7 +41,6 @@ describe("parseProvenanceMetadata", () => {
     expect(result.confidence).toBeUndefined();
     expect(result.provenanceState).toBeUndefined();
     expect(result.contradictedBy).toBeUndefined();
-    expect(result.inferredParagraphs).toBeUndefined();
   });
 
   it("parses confidence as a number in [0, 1]", () => {
@@ -71,11 +70,11 @@ describe("parseProvenanceMetadata", () => {
     ]);
   });
 
-  it("rejects invalid inferredParagraphs values", () => {
-    expect(parseProvenanceMetadata({ inferredParagraphs: 3 }).inferredParagraphs).toBe(3);
-    expect(parseProvenanceMetadata({ inferredParagraphs: -1 }).inferredParagraphs).toBeUndefined();
-    expect(parseProvenanceMetadata({ inferredParagraphs: 1.5 }).inferredParagraphs).toBeUndefined();
-  });
+  // Note: inferredParagraphs was previously a parsed frontmatter field
+  // sourced from the LLM extraction tool. It is now derived from the
+  // rendered body at lint time (see checkInferredWithoutCitations);
+  // any legacy value on disk is intentionally ignored. No corresponding
+  // parser test remains.
 });
 
 describe("frontmatter round-trip with provenance", () => {
@@ -85,7 +84,6 @@ describe("frontmatter round-trip with provenance", () => {
       confidence: 0.42,
       provenanceState: "inferred",
       contradictedBy: [{ slug: "rival-page", reason: "different number" }],
-      inferredParagraphs: 4,
     };
     const built = buildFrontmatter(fields);
     const { meta } = parseFrontmatter(`${built}\n\nBody.`);
@@ -95,7 +93,6 @@ describe("frontmatter round-trip with provenance", () => {
     expect(provenance.contradictedBy).toEqual([
       { slug: "rival-page", reason: "different number" },
     ]);
-    expect(provenance.inferredParagraphs).toBe(4);
   });
 });
 
@@ -110,7 +107,6 @@ describe("parseConcepts handles new optional fields", () => {
           confidence: 0.3,
           provenance_state: "inferred",
           contradicted_by: [{ slug: "rival" }],
-          inferred_paragraphs: 2,
         },
       ],
     });
@@ -118,7 +114,6 @@ describe("parseConcepts handles new optional fields", () => {
     expect(concept.confidence).toBe(0.3);
     expect(concept.provenanceState).toBe("inferred");
     expect(concept.contradictedBy).toEqual([{ slug: "rival" }]);
-    expect(concept.inferredParagraphs).toBe(2);
   });
 
   it("still parses concepts with no provenance fields", () => {
@@ -175,17 +170,7 @@ describe("checkContradictedPages", () => {
 });
 
 describe("checkInferredWithoutCitations", () => {
-  it("flags pages whose metadata reports too many inferred paragraphs", async () => {
-    await writeConcept(
-      "infer",
-      "---\ntitle: Infer\ninferredParagraphs: 5\n---\nA cited paragraph. ^[src.md]",
-    );
-    const results = await checkInferredWithoutCitations(tmpDir);
-    expect(results).toHaveLength(1);
-    expect(results[0].rule).toBe("excess-inferred-paragraphs");
-  });
-
-  it("falls back to counting uncited prose paragraphs when metadata is absent", async () => {
+  it("flags pages with too many uncited prose paragraphs in the body", async () => {
     const body = [
       "First uncited prose paragraph here.",
       "Second uncited prose paragraph here.",
@@ -194,6 +179,21 @@ describe("checkInferredWithoutCitations", () => {
     await writeConcept("nocitations", `---\ntitle: NoCites\n---\n${body}`);
     const results = await checkInferredWithoutCitations(tmpDir);
     expect(results).toHaveLength(1);
+    expect(results[0].rule).toBe("excess-inferred-paragraphs");
+  });
+
+  // Body is the only signal — a stale frontmatter `inferredParagraphs`
+  // value from an older compile is intentionally ignored. A page whose
+  // body is fully cited should pass even if the legacy metadata field
+  // claims otherwise.
+  it("ignores legacy inferredParagraphs frontmatter and trusts the body", async () => {
+    const body = "A cited paragraph. ^[src.md]\n\nAnother cited paragraph. ^[src.md]";
+    await writeConcept(
+      "legacy-meta",
+      `---\ntitle: Legacy\ninferredParagraphs: 5\n---\n${body}`,
+    );
+    const results = await checkInferredWithoutCitations(tmpDir);
+    expect(results).toHaveLength(0);
   });
 
   it("does not flag pages whose paragraphs are all cited", async () => {
@@ -201,6 +201,24 @@ describe("checkInferredWithoutCitations", () => {
     await writeConcept("good", `---\ntitle: Good\n---\n${body}`);
     const results = await checkInferredWithoutCitations(tmpDir);
     expect(results).toHaveLength(0);
+  });
+
+  // Prose detection must use Unicode letter properties so non-ASCII pages
+  // generated via `--lang Chinese`, `--lang Japanese`, etc. (#46) are
+  // counted. The previous `[A-Za-z]` pattern silently dropped CJK,
+  // Cyrillic, Greek, and Arabic prose, leaving the rule blind on those
+  // pages.
+  it("counts non-ASCII prose paragraphs (CJK, Cyrillic, Japanese)", async () => {
+    const body = [
+      "测试段落一,这是中文第一段。",
+      "测试段落二,这是中文第二段。",
+      "Привет — это третий абзац на русском языке.",
+      "これは日本語の段落です。",
+    ].join("\n\n");
+    await writeConcept("multilang", `---\ntitle: Multi\n---\n${body}`);
+    const results = await checkInferredWithoutCitations(tmpDir);
+    expect(results).toHaveLength(1);
+    expect(results[0].message).toContain("4 inferred paragraphs");
   });
 });
 
@@ -234,12 +252,9 @@ describe("reconcileConceptMetadata", () => {
     expect(result.contradictedBy).toHaveLength(3);
   });
 
-  it("takes the maximum inferredParagraphs across two concepts", () => {
-    const first = { concept: "X", summary: "s", is_new: true, inferredParagraphs: 1 };
-    const second = { concept: "X", summary: "s", is_new: false, inferredParagraphs: 4 };
-    const result = reconcileConceptMetadata(first, second);
-    expect(result.inferredParagraphs).toBe(4);
-  });
+  // No reconciliation case for inferredParagraphs anymore — the field
+  // was dropped from ExtractedConcept once the lint rule started
+  // deriving the count from the rendered body.
 
   it("inherits incoming confidence when existing has none", () => {
     const first = { concept: "X", summary: "s", is_new: true };

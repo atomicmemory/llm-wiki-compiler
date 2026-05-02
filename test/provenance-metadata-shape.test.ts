@@ -2,12 +2,11 @@
  * Compile-time pin for the shared ProvenanceMetadata shape.
  *
  * Codex's post-merge schema-overlap audit flagged that ExtractedConcept
- * and WikiFrontmatter independently re-declared the same four optional
- * fields (confidence, provenanceState, contradictedBy,
- * inferredParagraphs), which was a drift hazard. The fix composes both
- * surfaces from a single exported `ProvenanceMetadata` interface in
- * src/utils/types.ts, plus drops the duplicate private interface that
- * lived in src/utils/markdown.ts.
+ * and WikiFrontmatter independently re-declared the same provenance
+ * fields (confidence, provenanceState, contradictedBy), which was a
+ * drift hazard. The fix composes both surfaces from a single exported
+ * `ProvenanceMetadata` interface in src/utils/types.ts, plus drops the
+ * duplicate private interface that lived in src/utils/markdown.ts.
  *
  * The two type-level assertions at the top are the strict guard: they
  * compile only when every key present on ProvenanceMetadata is also a
@@ -51,7 +50,6 @@ describe("ProvenanceMetadata shared shape", () => {
       confidence: 0.9,
       provenanceState: "extracted",
       contradictedBy: [{ slug: "other" }],
-      inferredParagraphs: 2,
     };
     const provenance: ProvenanceMetadata = concept;
     expect(provenance.confidence).toBe(0.9);
@@ -68,10 +66,9 @@ describe("ProvenanceMetadata shared shape", () => {
       confidence: 0.8,
       provenanceState: "merged",
       contradictedBy: [{ slug: "alt" }],
-      inferredParagraphs: 1,
     };
     const provenance: ProvenanceMetadata = frontmatter;
     expect(provenance.contradictedBy).toEqual([{ slug: "alt" }]);
-    expect(provenance.inferredParagraphs).toBe(1);
+    expect(provenance.confidence).toBe(0.8);
   });
 });

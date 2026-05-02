@@ -142,15 +142,24 @@ describe("confidence metadata — CLI lint integration", () => {
   // excess-inferred-paragraphs rule
   // -------------------------------------------------------------------------
 
-  it("reports excess-inferred-paragraphs when inferredParagraphs > 2 with no citations", async () => {
+  it("reports excess-inferred-paragraphs when the body has too many uncited prose paragraphs", async () => {
+    // Each uncited prose paragraph contributes to the count; five exceeds
+    // the max of two. Body is the only signal — the lint rule no longer
+    // reads any frontmatter inferredParagraphs field.
+    const body = [
+      "First uncited prose paragraph.",
+      "Second uncited prose paragraph.",
+      "Third uncited prose paragraph.",
+      "Fourth uncited prose paragraph.",
+      "Fifth uncited prose paragraph.",
+    ].join("\n\n");
     const content = buildPageContent(
-      { title: "Inferred Concept", summary: "Mostly inferred.", inferredParagraphs: "5" },
-      "This page declares five inferred paragraphs, exceeding the maximum of two.",
+      { title: "Inferred Concept", summary: "Mostly inferred." },
+      body,
     );
     const root = await createWikiFixture("inferred", content);
     try {
       const { stdout } = await runLint(root);
-      // Assert on the message count and threshold text.
       expect(stdout).toContain("5 inferred paragraphs");
       expect(stdout).toContain("max 2");
     } finally {
@@ -200,19 +209,26 @@ describe("confidence metadata — CLI lint integration", () => {
   // -------------------------------------------------------------------------
 
   it("surfaces all three new rule messages when a page violates all constraints", async () => {
-    // Use raw YAML array syntax for contradictedBy alongside other scalar fields.
+    // The inferred-paragraphs rule now derives its count from the body —
+    // include enough uncited prose paragraphs to trigger it alongside
+    // the low-confidence and contradiction signals.
+    const body = [
+      "This page deliberately violates all three new lint rules.",
+      "Second uncited prose paragraph here.",
+      "Third uncited prose paragraph here.",
+      "Fourth uncited prose paragraph here.",
+    ].join("\n\n");
     const content = [
       "---",
       ...sharedFrontmatterLines(),
       "title: All Flags Concept",
       "summary: Triggers every new rule.",
       "confidence: 0.1",
-      "inferredParagraphs: 4",
       "contradictedBy:",
       "  - slug: rival-page",
       "---",
       "",
-      "This page deliberately violates all three new lint rules.",
+      body,
     ].join("\n");
     const root = await createWikiFixture("all-flags", content);
     try {
