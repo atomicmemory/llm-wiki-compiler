@@ -55,16 +55,25 @@ async function writeSchemaWithSeedPage(rootDir: string, seedTitle: string): Prom
   );
 }
 
+/**
+ * Stand up a workspace with a one-seed schema, stub the LLM, silence
+ * console output, then run compileAndReport — the four-line dance every
+ * test below repeats. fallow's CI mode flagged the duplicate boilerplate
+ * as a clone group otherwise.
+ */
+async function runSeedPageCompile(
+  seedTitle: string,
+  options: { review?: boolean } = {},
+): Promise<Awaited<ReturnType<typeof compileAndReport>>> {
+  await writeSchemaWithSeedPage(root.dir, seedTitle);
+  await stubLLMForSeedPage(seedTitle);
+  vi.spyOn(console, "log").mockImplementation(() => {});
+  return compileAndReport(root.dir, options);
+}
+
 describe("seed pages generated when no source files changed", () => {
   it("creates the seed page even when all sources are up to date", async () => {
-    const seedTitle = "Project Overview";
-    await writeSchemaWithSeedPage(root.dir, seedTitle);
-    await stubLLMForSeedPage(seedTitle);
-    vi.spyOn(console, "log").mockImplementation(() => {});
-
-    // No sources present → compile detects nothing to compile and would
-    // previously early-return before generating seed pages.
-    const result = await compileAndReport(root.dir, {});
+    const result = await runSeedPageCompile("Project Overview");
     expect(result.compiled).toBe(0);
 
     // The seed page must be written to wiki/concepts/<slug>.md
@@ -73,12 +82,7 @@ describe("seed pages generated when no source files changed", () => {
   });
 
   it("rebuilds wiki/index.md after writing seed pages on the early-return path", async () => {
-    const seedTitle = "Domain Overview";
-    await writeSchemaWithSeedPage(root.dir, seedTitle);
-    await stubLLMForSeedPage(seedTitle);
-    vi.spyOn(console, "log").mockImplementation(() => {});
-
-    await compileAndReport(root.dir, {});
+    await runSeedPageCompile("Domain Overview");
 
     // wiki/index.md must exist and reference the newly-written seed page
     const indexPath = path.join(root.dir, "wiki", "index.md");
@@ -88,12 +92,7 @@ describe("seed pages generated when no source files changed", () => {
   });
 
   it("does not generate seed pages in review mode (review keeps wiki/ clean)", async () => {
-    const seedTitle = "Review Overview";
-    await writeSchemaWithSeedPage(root.dir, seedTitle);
-    await stubLLMForSeedPage(seedTitle);
-    vi.spyOn(console, "log").mockImplementation(() => {});
-
-    await compileAndReport(root.dir, { review: true });
+    await runSeedPageCompile("Review Overview", { review: true });
 
     // Seed pages must not land in wiki/ when running in review mode
     const seedPath = path.join(root.dir, CONCEPTS_DIR, "review-overview.md");
@@ -105,27 +104,17 @@ describe("seed pages generated when no source files changed", () => {
     // landed on disk silently — they were absent from CompileResult.pages
     // even though they were just written. Downstream MCP / programmatic
     // consumers had no way to discover them without scanning wiki/.
-    const seedTitle = "Reportable Overview";
-    await writeSchemaWithSeedPage(root.dir, seedTitle);
-    await stubLLMForSeedPage(seedTitle);
-    vi.spyOn(console, "log").mockImplementation(() => {});
-
-    const result = await compileAndReport(root.dir, {});
-
+    const result = await runSeedPageCompile("Reportable Overview");
     expect(result.pages).toContain("reportable-overview");
   });
 
   it("propagates seed-page validation errors into CompileResult on the early-return path", async () => {
-    const seedTitle = "Broken Overview";
-    await writeSchemaWithSeedPage(root.dir, seedTitle);
-    await stubLLMForSeedPage(seedTitle);
-    vi.spyOn(console, "log").mockImplementation(() => {});
-
-    // Force validateWikiPage to reject the seed page so an error is recorded
+    // Force validateWikiPage to reject the seed page so an error is recorded.
+    // Spy is set BEFORE compile runs so the validation rejection takes effect.
     const markdownUtils = await import("../src/utils/markdown.js");
     vi.spyOn(markdownUtils, "validateWikiPage").mockReturnValue(false);
 
-    const result = await compileAndReport(root.dir, {});
+    const result = await runSeedPageCompile("Broken Overview");
 
     // The seed-page error must surface in CompileResult.errors
     expect(result.errors.length).toBeGreaterThan(0);

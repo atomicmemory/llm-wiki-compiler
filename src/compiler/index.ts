@@ -267,7 +267,7 @@ async function runCompilePipeline(
       await generateSeedPages(root, schema, emptyGeneration);
       // Rebuild index/MOC so the newly-written seed pages become discoverable,
       // and propagate any seed-page validation errors into the returned result.
-      await finalizeWiki(root, emptyGeneration.pages);
+      await finalizeWiki(root, emptyGeneration.pages, emptyGeneration.seedSlugs);
       return {
         ...emptyCompileResult(),
         skipped: buckets.unchanged.length,
@@ -312,7 +312,7 @@ async function runCompilePipeline(
     // Seed pages write directly into wiki/, so skip them in review mode
     // to honour the "no wiki/ mutation" contract of that mode.
     await generateSeedPages(root, schema, generation);
-    await finalizeWiki(root, generation.pages);
+    await finalizeWiki(root, generation.pages, generation.seedSlugs);
   }
   return summarizeCompile(buckets, generation, extractions, options);
 }
@@ -374,10 +374,25 @@ async function runExtractionPhases(
   return extractions;
 }
 
-/** Resolve interlinks, regenerate index/MOC, refresh embeddings post-write. */
-async function finalizeWiki(root: string, pages: MergedConcept[]): Promise<void> {
-  const allChangedSlugs = pages.map((entry) => entry.slug);
-  const allNewSlugs = pages.filter((entry) => entry.concept.is_new).map((entry) => entry.slug);
+/**
+ * Resolve interlinks, regenerate index/MOC, refresh embeddings
+ * post-write. Seed-page slugs are folded into both the changed-slug
+ * set (so embeddings refresh covers them) and the new-slug set (so
+ * inbound-link resolution scans existing pages for mentions of seed
+ * titles). Without that, schema-declared seed pages would land on
+ * disk but stay unlinked and absent from the embedding store.
+ */
+async function finalizeWiki(
+  root: string,
+  pages: MergedConcept[],
+  seedSlugs: string[] = [],
+): Promise<void> {
+  const conceptChangedSlugs = pages.map((entry) => entry.slug);
+  const conceptNewSlugs = pages
+    .filter((entry) => entry.concept.is_new)
+    .map((entry) => entry.slug);
+  const allChangedSlugs = [...conceptChangedSlugs, ...seedSlugs];
+  const allNewSlugs = [...conceptNewSlugs, ...seedSlugs];
 
   if (allChangedSlugs.length > 0) {
     output.status("🔗", output.info("Resolving interlinks..."));
